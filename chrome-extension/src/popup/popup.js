@@ -160,10 +160,12 @@ async function handleStart() {
     return;
   }
 
+  const dryRun = document.getElementById("dryRunToggle")?.checked || false;
+
   chrome.runtime.sendMessage(
     {
       action: "startAutomation",
-      payload: { filter_id: filterId, max_applies: 10 },
+      payload: { filter_id: filterId, max_applies: 10, dry_run: dryRun },
     },
     (response) => {
       if (response?.success) {

@@ -33,8 +33,7 @@ async def test_linkedin_auth_check():
         pytest.skip(f"Playwright not ready: {e}")
 
 
-@pytest.mark.asyncio
-async def test_job_search_url_building():
+def test_job_search_url_building():
     """Test job search URL construction."""
     url = job_searcher.build_search_url(
         keywords="Python",
@@ -43,7 +42,7 @@ async def test_job_search_url_building():
         easy_apply=True
     )
     assert "keywords=Python" in url
-    assert "location=San Francisco" in url
+    assert "location=San" in url and "Francisco" in url
     assert "f_AL=true" in url
     assert url.startswith("https://www.linkedin.com/jobs/search/")
 

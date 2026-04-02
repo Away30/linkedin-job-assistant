@@ -13,7 +13,7 @@ dependencies = [
     "sqlalchemy==2.0.35",
     "pydantic==2.9.0",
     "pydantic-settings==2.5.0",
-    "playwright==1.48.0",
+    "playwright==1.58.0",
     "python-multipart==0.0.12",
     "aiofiles==24.1.0",
     "pyyaml==6.0.2",
