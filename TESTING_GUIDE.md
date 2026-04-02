@@ -1,386 +1,287 @@
 # Testing Guide
 
-Complete testing instructions for the LinkedIn Auto-Apply tool.
+Practical verification steps for the current repository state.
 
-## Unit Tests (No Browser Required)
+This document is aligned with `README.md` and `QUICKSTART.md`. If you find conflicting instructions elsewhere, treat those two files plus this guide as the source of truth.
 
-### 1. Test Job Search URL Building
+## Test Goals
+
+Use testing in this order:
+
+1. Verify the backend can start locally
+2. Verify API endpoints and database initialization
+3. Verify the extension can talk to the backend
+4. Verify Playwright/browser automation in your local environment
+5. Verify one controlled end-to-end flow
+
+## Recommended Test Environment
 
 ```bash
-cd backend
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .[dev]
+python -m playwright install chromium
+cp .env.example .env
+```
+
+Before testing the extension, set `LJA_EXTENSION_ID` in `backend/.env` and start the backend with:
+
+```bash
+python -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8899
+```
+
+## 1. Smoke Test: Backend Startup
+
+```bash
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+source venv/bin/activate
+python -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8899
+```
+
+In another terminal:
+
+```bash
+curl http://127.0.0.1:8899/health
+curl http://127.0.0.1:8899/api/v1/ping
+```
+
+Expected responses:
+
+```json
+{"status":"ok","app":"LinkedIn Job Assistant"}
+```
+
+```json
+{"message":"pong"}
+```
+
+## 2. Python Test Suite
+
+### Manual sanity script
+
+```bash
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
 source venv/bin/activate
 python test_manual.py
 ```
 
-**What it tests:**
-- Job search URL construction with various filter combinations
-- Parameter encoding (keywords, location, experience level, job type)
-- Human simulator delays
+This is a quick sanity check for utility code such as search URL generation and delay helpers.
 
-**Expected output:**
-```
-✓ All manual tests completed successfully!
-```
+### API tests
 
-### 2. API Endpoint Tests
-
-**Backend must be running:**
 ```bash
-# In one terminal
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8899
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+source venv/bin/activate
+python -m pytest tests/test_api.py -q
 ```
 
-**In another terminal:**
-```bash
-# Test health endpoint
-curl http://127.0.0.1:8899/health
+### Additional backend tests
 
-# Test create filter
+```bash
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+source venv/bin/activate
+python -m pytest tests -q
+```
+
+Notes:
+
+- Some tests are pure API/database tests and should run without a browser.
+- Browser automation tests may depend on local OS/browser permissions and Playwright availability.
+- If browser tests fail, separate environment failures from code failures.
+
+## 3. API Verification by Hand
+
+With the backend running:
+
+```bash
+curl http://127.0.0.1:8899/api/v1/filters
+curl http://127.0.0.1:8899/api/v1/resumes
+curl http://127.0.0.1:8899/api/v1/applications
+curl http://127.0.0.1:8899/api/v1/automation/status
+curl http://127.0.0.1:8899/api/v1/stats/summary
+```
+
+Useful write checks:
+
+```bash
 curl -X POST http://127.0.0.1:8899/api/v1/filters \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Test Filter",
     "keywords": "Python Engineer",
-    "location": "San Francisco",
+    "location": "Remote",
     "easy_apply_only": true
   }'
-
-# Test list filters
-curl http://127.0.0.1:8899/api/v1/filters | jq
-
-# Test get automation status
-curl http://127.0.0.1:8899/api/v1/automation/status | jq
 ```
 
----
+## 4. Extension Testing
 
-## Integration Tests (Browser Required)
+### Load the extension
 
-### Prerequisites
+1. Open `chrome://extensions/`
+2. Enable Developer mode
+3. Click `Load unpacked`
+4. Select `/Users/away/Desktop/Linkedin投递/linkedin-job-assistant/chrome-extension`
+5. Copy the extension ID into `backend/.env` as `LJA_EXTENSION_ID`
+6. Reload the backend if needed
+7. Reload the extension
+
+### Backend connectivity test
+
+1. Start backend with `--env-file .env`
+2. Open the extension popup
+3. Confirm it shows backend connected
+
+If it still shows offline:
+
+- confirm `curl http://127.0.0.1:8899/health`
+- confirm `LJA_EXTENSION_ID` is correct
+- reload the extension after editing `.env`
+
+### Settings page test
+
+1. Open extension `Settings`
+2. Create a test filter
+3. Upload a test resume
+4. Confirm both appear in their respective lists
+
+### Dashboard test
+
+1. Open extension `Dashboard`
+2. Confirm the page loads without console errors
+3. Confirm empty state or current application rows render
+4. Confirm filters and CSV export do not crash
+
+## 5. Browser Automation Tests
+
+### Playwright launch test
+
 ```bash
-cd backend
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
 source venv/bin/activate
-
-# Install Playwright (if not already done)
-python -m pip install playwright
-python -m playwright install chromium
+python -m pytest tests/test_automation_integration.py::test_browser_manager_launch -q
 ```
 
-### Test 1: Browser Launch & Stealth
-
-**File:** `tests/test_automation_integration.py`
+### Manual browser launch check
 
 ```bash
-# Run with pytest
-pytest tests/test_automation_integration.py::test_browser_manager_launch -v
-
-# Or run directly
-python -c "
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+source venv/bin/activate
+python - <<'PY'
 import asyncio
 from app.automation.browser_manager import browser_manager
 
-async def test():
-    print('Launching browser...')
-    page = await browser_manager.launch(headless=True)
-    print(f'✓ Browser launched, URL: {page.url}')
+async def main():
+    page = await browser_manager.launch(headless=False)
+    print("Browser launched:", bool(page))
     await browser_manager.close()
-    print('✓ Browser closed')
 
-asyncio.run(test())
-"
+asyncio.run(main())
+PY
 ```
 
-### Test 2: LinkedIn Auth Check
+### Login flow check
 
-```python
+```bash
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+source venv/bin/activate
+python - <<'PY'
 import asyncio
-from app.automation.browser_manager import browser_manager
 from app.automation.linkedin_auth import linkedin_auth
 
-async def test():
-    print('Testing LinkedIn authentication check...')
-    page = await browser_manager.launch(headless=False)
-    print('Opening LinkedIn...')
-    await page.goto('https://www.linkedin.com')
-    
-    is_logged_in = await linkedin_auth.is_logged_in(page)
-    print(f'Logged in: {is_logged_in}')
-    
-    await browser_manager.close()
+async def main():
+    ok = await linkedin_auth.wait_for_manual_login(timeout_seconds=300)
+    print("Login success:", ok)
 
-asyncio.run(test())
+asyncio.run(main())
+PY
 ```
 
-### Test 3: Manual Login Flow
+## 6. End-to-End Verification
 
-```python
-import asyncio
-from app.automation.browser_manager import browser_manager
-from app.automation.linkedin_auth import linkedin_auth
+Use a controlled test, not an unlimited live run:
 
-async def test():
-    print('Testing manual login flow...')
-    page = await browser_manager.launch(headless=False)
-    
-    print('Waiting for manual login (300 seconds timeout)...')
-    print('Browser window should open - please log in manually')
-    
-    success = await linkedin_auth.wait_for_manual_login(timeout_seconds=300)
-    
-    if success:
-        print('✓ Login successful!')
-    else:
-        print('✗ Login timeout')
-    
-    await browser_manager.close()
+1. Start backend with `--env-file .env`
+2. Load and reload the extension after setting `LJA_EXTENSION_ID`
+3. Create one filter
+4. Upload one resume
+5. Replace placeholder values in `backend/data/config/form_answers.yaml`
+6. Start automation from the popup
+7. Log into LinkedIn manually if prompted
+8. Watch:
+   - popup status
+   - backend log file
+   - database rows
 
-asyncio.run(test())
-```
+What to verify:
 
----
+- automation status changes from idle to running
+- browser opens
+- login detection works
+- search starts
+- jobs are found or a clear failure reason is recorded
+- results appear in logs or database
 
-## Chrome Extension Testing
+## Logs and Database Inspection
 
-### 1. Load Extension in Chrome
-
-```
-1. Open chrome://extensions/
-2. Enable "Developer mode" (top-right toggle)
-3. Click "Load unpacked"
-4. Select: linkedin-job-assistant/chrome-extension/
-5. Pin extension to toolbar
-```
-
-### 2. Test Backend Connection
-
-```
-1. Start backend: python -m uvicorn app.main:app --host 127.0.0.1 --port 8899
-2. Click extension icon
-3. Should show "Backend connected ✓" (green dot)
-```
-
-### 3. Test Settings Page
-
-```
-1. Click extension → Settings
-2. Create a search filter:
-   - Name: "Test Python"
-   - Keywords: "Python"
-   - Location: "San Francisco"
-   - ✓ Easy Apply Only
-3. Click "Save Filter"
-4. Should see filter listed below
-5. Upload a resume PDF
-```
-
-### 4. Test Dashboard
-
-```
-1. Click extension → Dashboard
-2. Should open new tab with application tracker
-3. Table should be empty initially (no applications yet)
-```
-
----
-
-## End-to-End Testing
-
-### Full Workflow Test
-
-```
-1. Start backend: python -m uvicorn app.main:app --host 127.0.0.1 --port 8899
-2. Load extension in Chrome
-3. Create a test filter in Settings
-4. Upload a test resume
-5. Click "Start Auto-Apply" in popup
-6. Browser launches - LOG IN TO LINKEDIN MANUALLY
-7. After login, automation should:
-   - Begin searching for jobs
-   - Show progress in popup
-   - Apply to jobs automatically
-8. Watch the dashboard for applications
-9. Click "Stop" to stop automation
-```
-
----
-
-## Debugging
-
-### Backend Logs
+### Runtime logs
 
 ```bash
-# View real-time logs while backend is running
-tail -f data/logs/app.log
-
-# Check operation logs in database
-sqlite3 data/db/linkedin_assistant.db
-> SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 10;
+tail -f /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend/data/logs/automation.log
 ```
 
-### Browser Inspector
-
-When testing with headless=False:
-1. Browser window opens automatically
-2. Use F12 to open DevTools
-3. Check Console for errors
-4. Inspect Elements to verify selectors
-
-### Extension Errors
-
-```
-1. Open chrome://extensions/
-2. Find "LinkedIn Smart Apply Assistant"
-3. Click "Inspect views"
-4. Check Console and Network tabs
-```
-
-### Database Inspection
+### SQLite inspection
 
 ```bash
-cd backend/data/db
-
-# View database schema
-sqlite3 linkedin_assistant.db ".schema"
-
-# Query specific tables
-sqlite3 linkedin_assistant.db "SELECT * FROM search_filters LIMIT 5;"
-sqlite3 linkedin_assistant.db "SELECT * FROM applications LIMIT 5;"
-sqlite3 linkedin_assistant.db "SELECT * FROM operation_logs LIMIT 10;"
-
-# Export to CSV
-sqlite3 linkedin_assistant.db ".mode csv" ".output data.csv" "SELECT * FROM applications;"
+sqlite3 /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend/data/db/linkedin_assistant.db ".tables"
+sqlite3 /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend/data/db/linkedin_assistant.db "SELECT COUNT(*) FROM search_filters;"
+sqlite3 /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend/data/db/linkedin_assistant.db "SELECT COUNT(*) FROM resumes;"
+sqlite3 /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend/data/db/linkedin_assistant.db "SELECT COUNT(*) FROM applications;"
+sqlite3 /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend/data/db/linkedin_assistant.db "SELECT * FROM operation_logs ORDER BY created_at DESC LIMIT 10;"
 ```
 
----
+## Common Failures
 
-## Test Checklist
+### Backend is healthy, extension is offline
 
-### Phase 1: Foundation ✓
-- [x] Backend starts successfully
-- [x] Health check endpoint works
-- [x] Database initialized
-- [x] API endpoints respond
-- [x] Job search URL building works
-- [x] Human simulator delays work
+Likely causes:
 
-### Phase 2: Browser & Auth
-- [ ] Browser launches successfully
-- [ ] Persistent context profile created
-- [ ] Manual login flow works
-- [ ] Session persists after restart
-- [ ] LinkedIn detection works
+- backend started without `--env-file .env`
+- wrong or missing `LJA_EXTENSION_ID`
+- extension was not reloaded after config change
 
-### Phase 3: Job Search & Scrape
-- [ ] Job search navigates to LinkedIn
-- [ ] Job listings are extracted
-- [ ] Job data stored in database
-- [ ] Pagination works
-- [ ] Filters applied correctly
+### Playwright browser does not launch
 
-### Phase 4: Easy Apply
-- [ ] Easy Apply button detected
-- [ ] Form fields identified
-- [ ] Form fields filled correctly
-- [ ] Resume uploaded successfully
-- [ ] Application submitted
-- [ ] Success confirmation detected
+Likely causes:
 
-### Phase 5: Automation Orchestration
-- [ ] Rate limiter enforces daily caps
-- [ ] Warmup schedule works
-- [ ] Status updates broadcast to popup
-- [ ] Stop command gracefully halts
-- [ ] Error recovery works
+- Chromium not installed with `python -m playwright install chromium`
+- local OS restrictions
+- environment/sandbox restrictions
 
-### Phase 6: Integration
-- [ ] Extension popup shows status
-- [ ] Settings page manages filters
-- [ ] Dashboard displays applications
-- [ ] CSV export works
-- [ ] Full workflow end-to-end
+### No applications appear
 
----
+Check these in order:
 
-## Performance Testing
+1. A filter exists
+2. A resume exists
+3. Form answers are not still placeholders
+4. LinkedIn login completed
+5. `automation.log` contains search/apply progress or clear errors
 
-### Metrics to Track
+## Suggested Verification Checklist
 
-```bash
-# Time per application (target: 30-60 seconds)
-# Includes: form detection, filling, submission, human delays
+- [ ] Backend starts locally
+- [ ] `/health` returns 200
+- [ ] `tests/test_api.py` passes
+- [ ] Extension connects to backend
+- [ ] Filter creation works
+- [ ] Resume upload works
+- [ ] Browser launches locally
+- [ ] Login check works
+- [ ] One end-to-end run produces logs and/or DB records
 
-# Daily application limit (configurable, default: 25)
-# Should enforce hard cap
+## Last Updated
 
-# Memory usage (target: <200MB for browser)
-# Monitor with: top, htop
-
-# Database size growth (target: <10MB for 1000 applications)
-# Check with: ls -lh data/db/linkedin_assistant.db
-```
-
----
-
-## Common Issues & Solutions
-
-### "Browser won't launch"
-```bash
-# Verify Playwright is installed
-python -m playwright install chromium
-
-# Check if Chromium executable exists
-ls ~/Library/Caches/ms-playwright/chromium-*/
-```
-
-### "Login timeout"
-- Browser opened in headless mode (can't log in interactively)
-- Solution: Set `headless=False` in test code
-
-### "Form fields not found"
-- LinkedIn CSS selectors change frequently
-- Solution: Update selectors in form_filler.py
-- Check browser DevTools to find current selectors
-
-### "Rate limit not enforcing"
-- Check operation_logs table for entries
-- Verify daily_apply_limit setting
-- Restart backend to reset in-memory counters
-
----
-
-## Continuous Testing
-
-### Automated Test Run
-
-```bash
-#!/bin/bash
-# save as scripts/test_all.sh
-
-set -e
-
-echo "Starting tests..."
-
-# Unit tests
-echo "1. Running unit tests..."
-cd backend
-source venv/bin/activate
-python test_manual.py
-
-# API tests
-echo "2. Testing API endpoints..."
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8899 &
-SERVER_PID=$!
-sleep 3
-
-curl -f http://127.0.0.1:8899/health > /dev/null && echo "✓ Health check passed"
-curl -f http://127.0.0.1:8899/api/v1/filters > /dev/null && echo "✓ API endpoints work"
-
-kill $SERVER_PID
-
-echo "✓ All tests passed!"
-```
-
----
-
-**Last Updated:** March 2026
-**Status:** Testing framework ready for Phase 2
+April 2026
