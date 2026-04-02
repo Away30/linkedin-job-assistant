@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>LinkedIn Auto-Apply Settings</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #0a66c2;
+      margin-bottom: 30px;
+      font-size: 28px;
+    }
+    h2 {
+      color: #333;
+      font-size: 18px;
+      margin-top: 30px;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #0a66c2;
+      padding-bottom: 10px;
+    }
+
+    .section {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+      color: #333;
+      font-size: 13px;
+    }
+    input,
+    textarea,
+    select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    input:focus,
+    textarea:focus,
+    select:focus {
+      outline: none;
+      border-color: #0a66c2;
+      box-shadow: 0 0 0 3px rgba(10, 102, 194, 0.1);
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #0a66c2;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #004182;
+    }
+    .btn-secondary {
+      background: #f5f5f5;
+      color: #333;
+      border: 1px solid #ddd;
+    }
+    .btn-secondary:hover {
+      background: #e8e8e8;
+    }
+    .btn-danger {
+      background: #e74c3c;
+      color: white;
+    }
+
+    .filter-list {
+      margin-top: 20px;
+    }
+    .filter-item {
+      background: #f9f9f9;
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border: 1px solid #ddd;
+    }
+    .filter-item-name {
+      font-weight: 600;
+      color: #333;
+    }
+    .filter-item-details {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .resume-list {
+      margin-top: 20px;
+    }
+    .resume-item {
+      background: #f9f9f9;
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border: 1px solid #ddd;
+    }
+    .resume-item-name {
+      font-weight: 600;
+      color: #333;
+    }
+    .resume-item-badge {
+      background: #0a66c2;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .message {
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+    }
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚙️ Settings</h1>
+
+    <div id="message" class="message" style="display: none;"></div>
+
+    <!-- Connection & API Key Section -->
+    <h2>Connection & API Key</h2>
+    <div class="section">
+      <div class="form-row">
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" id="apiKeyInput" placeholder="Enter your API key" />
+        </div>
+        <div class="form-group" style="display:flex;align-items:flex-end;">
+          <button class="btn-primary" id="saveApiKeyBtn">Save API Key</button>
+        </div>
+      </div>
+      <div class="button-group">
+        <button class="btn-secondary" id="testConnectionBtn">Test Connection</button>
+        <span id="testConnectionResult" style="margin-left:12px;line-height:36px;font-size:13px;"></span>
+      </div>
+    </div>
+
+    <!-- Search Filters Section -->
+    <h2>Search Filters</h2>
+    <div class="section">
+      <div class="form-group">
+        <label>Filter Name</label>
+        <input type="text" id="filterName" placeholder="e.g., Software Engineer Bay Area" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Keywords</label>
+          <input type="text" id="filterKeywords" placeholder="e.g., Python, React, Backend" />
+        </div>
+        <div class="form-group">
+          <label>Location</label>
+          <input type="text" id="filterLocation" placeholder="e.g., San Francisco, CA" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Job Type (comma-separated)</label>
+          <input type="text" id="filterJobType" placeholder="e.g., full-time,contract" />
+        </div>
+        <div class="form-group">
+          <label>Experience Level</label>
+          <select id="filterExperience">
+            <option value="">Any</option>
+            <option value="entry">Entry Level</option>
+            <option value="associate">Associate</option>
+            <option value="mid">Mid-Level</option>
+            <option value="senior">Senior</option>
+            <option value="executive">Executive</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="easyApplyOnly" /> Easy Apply Only
+        </label>
+      </div>
+      <div class="button-group">
+        <button class="btn-primary" id="saveFilterBtn">Save Filter</button>
+      </div>
+
+      <div class="filter-list" id="filterList"></div>
+    </div>
+
+    <!-- Resumes Section -->
+    <h2>Resumes</h2>
+    <div class="section">
+      <div class="form-group">
+        <label>Resume Name</label>
+        <input type="text" id="resumeName" placeholder="e.g., Software Engineer Resume" />
+      </div>
+      <div class="form-group">
+        <label>Resume File (PDF)</label>
+        <input type="file" id="resumeFile" accept=".pdf" />
+      </div>
+      <div class="form-group">
+        <label>Target Roles (comma-separated)</label>
+        <input type="text" id="resumeRoles" placeholder="e.g., Software Engineer, Frontend Engineer" />
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="resumeDefault" /> Set as Default
+        </label>
+      </div>
+      <div class="button-group">
+        <button class="btn-primary" id="uploadResumeBtn">Upload Resume</button>
+      </div>
+
+      <div class="resume-list" id="resumeList"></div>
+    </div>
+
+    <!-- Safety Settings Section -->
+    <h2>Safety & Rate Limiting</h2>
+    <div class="section">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Max Applications Per Day</label>
+          <input type="number" id="maxAppliesPerDay" min="1" max="100" value="25" />
+        </div>
+        <div class="form-group">
+          <label>Max Connect Requests Per Day</label>
+          <input type="number" id="maxConnectsPerDay" min="1" max="100" value="20" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Min Delay Between Actions (seconds)</label>
+          <input type="number" id="minDelay" min="1" max="30" value="3" />
+        </div>
+        <div class="form-group">
+          <label>Max Delay Between Actions (seconds)</label>
+          <input type="number" id="maxDelay" min="5" max="60" value="12" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="warmupEnabled" checked /> Enable Warmup Mode (7-day ramp-up)
+        </label>
+      </div>
+      <div class="button-group">
+        <button class="btn-primary" id="saveSafetyBtn">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

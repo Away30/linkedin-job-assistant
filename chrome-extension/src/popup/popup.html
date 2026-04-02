@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LinkedIn Smart Apply</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="container">
+      <!-- Header -->
+      <div class="header">
+        <h1>Smart Apply</h1>
+        <div class="health-indicator" id="healthIndicator">
+          <span class="dot red"></span>
+          <span class="text">Backend connecting...</span>
+        </div>
+      </div>
+
+      <!-- Status Card -->
+      <div class="status-card">
+        <div class="status-item">
+          <span class="label">Status:</span>
+          <span class="value" id="status">Idle</span>
+        </div>
+        <div class="status-item">
+          <span class="label">Applied:</span>
+          <span class="value" id="applied">0</span>
+        </div>
+        <div class="status-item">
+          <span class="label">Failed:</span>
+          <span class="value" id="failed">0</span>
+        </div>
+        <div class="status-item" id="progressRow" style="display:none;">
+          <span class="label">Progress:</span>
+          <span class="value" id="progress">0 / 0 today</span>
+        </div>
+        <div class="status-item" id="currentJobRow" style="display:none;">
+          <span class="label">Current Job:</span>
+          <span class="value" id="currentJob" style="font-size:11px;">-</span>
+        </div>
+      </div>
+
+      <!-- Inline Status Message -->
+      <div id="statusMessage" style="display:none;padding:8px 12px;margin-bottom:8px;border-radius:6px;font-size:12px;font-weight:600;"></div>
+
+      <!-- Filter Selection -->
+      <div class="control-section">
+        <label for="filterSelect">Search Filter:</label>
+        <select id="filterSelect">
+          <option value="">-- Select a filter --</option>
+        </select>
+      </div>
+
+      <!-- Controls -->
+      <div class="control-buttons">
+        <button id="startBtn" class="btn btn-primary">Start Auto-Apply</button>
+        <button id="stopBtn" class="btn btn-secondary" disabled>Stop</button>
+      </div>
+
+      <!-- Quick Links -->
+      <div class="quick-links">
+        <button id="dashboardBtn" class="link-btn">📊 Dashboard</button>
+        <button id="settingsBtn" class="link-btn">⚙️ Settings</button>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <small>v0.1.0 • Backend: <span id="backendStatus">offline</span></small>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

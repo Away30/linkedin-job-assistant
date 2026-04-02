@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linkedin-job-assistant"
+version = "0.1.0"
+description = "LinkedIn smart auto-apply job assistant"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.30.0",
+    "sqlalchemy==2.0.35",
+    "pydantic==2.9.0",
+    "pydantic-settings==2.5.0",
+    "playwright==1.48.0",
+    "python-multipart==0.0.12",
+    "aiofiles==24.1.0",
+    "pyyaml==6.0.2",
+    "python-dotenv==1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.3",
+    "pytest-asyncio==0.21.1",
+    "httpx==0.25.2",
+]

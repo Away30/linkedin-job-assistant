@@ -1,0 +1,23 @@
+# LinkedIn DOM Selectors Configuration
+# Override defaults by uncommenting and editing below.
+# The system tries selectors in order and uses the first match.
+
+# auth:
+#   feed_indicators:
+#     - '[data-test-id="feed-sort-dropdown"]'
+#     - ".feed-shared-update-v2"
+#     - ".global-nav__me-photo"
+
+# search:
+#   results_container:
+#     - ".jobs-search-results-list"
+
+# job_detail:
+#   title:
+#     - ".jobs-unified-top-card__job-title"
+#     - ".job-details-jobs-unified-top-card__job-title h1"
+
+# easy_apply:
+#   button:
+#     - "button.jobs-apply-button"
+#     - ".jobs-apply-button--top-card button"

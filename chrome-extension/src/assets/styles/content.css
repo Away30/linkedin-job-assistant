@@ -1,0 +1,28 @@
+/**
+ * Content Script Styles
+ */
+
+.linkedin-job-tracker-badge {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 12px 16px;
+  background: #0a66c2;
+  color: white;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 9999;
+  box-shadow: 0 4px 12px rgba(10, 102, 194, 0.3);
+  transition: all 0.2s;
+}
+
+.linkedin-job-tracker-badge:hover {
+  background: #004182;
+  box-shadow: 0 6px 16px rgba(10, 102, 194, 0.4);
+}
+
+.linkedin-job-tracker-badge.tracked {
+  background: #31a24c;
+}

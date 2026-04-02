@@ -1,0 +1,42 @@
+# Pre-configured form answers for LinkedIn Easy Apply
+# Keys are matched against form field labels using fuzzy matching.
+# Edit these values with your personal information before using.
+
+# Contact info
+phone_number: "555-0100"
+email: "test@example.com"
+
+# Common questions
+years_of_experience: "3"
+work_authorization: "Yes"
+sponsorship: "No"
+willing_to_relocate: "No"
+start_date: "2 weeks notice"
+salary_expectation: "Negotiable"
+notice_period: "2 weeks"
+
+# Diversity (US employers)
+gender: "Prefer not to say"
+ethnicity: "Prefer not to say"
+veteran_status: "No"
+disability_status: "No"
+
+# Education
+degree: "Bachelor's"
+school: "Test University"
+field_of_study: "Computer Science"
+gpa: "3.5"
+
+# Personal info
+first_name: "Test"
+last_name: "User"
+city: "San Francisco"
+state: "CA"
+country: "US"
+zip_code: "94105"
+linkedin_url: "https://linkedin.com/in/testuser"
+website: "https://github.com/testuser"
+
+# Other
+cover_letter: ""
+how_did_you_hear: "LinkedIn"
