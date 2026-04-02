@@ -1,119 +1,115 @@
-# Quick Start Guide
+# Quick Start
 
-Get the LinkedIn Auto-Apply tool running in 5 minutes.
+Use this if you want the shortest path from fresh clone to a working local setup.
 
-## Step 1: Start the Backend
+## 1. Backend install
 
 ```bash
-cd linkedin-job-assistant/backend
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+python3 -m venv venv
 source venv/bin/activate
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8899
+python -m pip install --upgrade pip
+python -m pip install -e .[dev]
+python -m playwright install chromium
+cp .env.example .env
 ```
 
-You should see:
-```
-INFO:     Uvicorn running on http://127.0.0.1:8899
-```
-
-**Verify it's working:**
-```bash
-curl http://127.0.0.1:8899/health
-# Should return: {"status":"ok","app":"LinkedIn Job Assistant"}
-```
-
-## Step 2: Load Chrome Extension
+## 2. Load the extension once
 
 1. Open `chrome://extensions/`
-2. Enable **Developer mode** (toggle in top-right)
-3. Click **Load unpacked**
-4. Select: `linkedin-job-assistant/chrome-extension/`
-5. Pin the extension to your toolbar
+2. Enable Developer mode
+3. Click `Load unpacked`
+4. Select `/Users/away/Desktop/Linkedin投递/linkedin-job-assistant/chrome-extension`
+5. Copy the extension ID
 
-## Step 3: Create Your First Filter
+## 3. Put the extension ID into `.env`
 
-1. Click the extension icon (pinned in toolbar)
-2. Click **Settings**
-3. Fill in search criteria:
-   - Filter Name: "Software Engineer"
-   - Keywords: "Python, Backend"
-   - Location: "San Francisco, CA"
-   - Experience Level: "Senior"
-   - ✓ Easy Apply Only
-4. Click **Save Filter**
+Edit `/Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend/.env`:
 
-## Step 4: Upload Resume
+```dotenv
+LJA_EXTENSION_ID=your_real_extension_id_here
+```
 
-Still in Settings:
-1. Name: "Software Engineer Resume"
-2. Select file: (your resume PDF)
-3. Target Roles: "Software Engineer, Backend Engineer"
-4. ✓ Set as Default
-5. Click **Upload Resume**
+Without this, the backend CORS configuration may reject the extension.
 
-## Step 5: Start Automation
-
-1. Click extension popup again
-2. Select your filter from dropdown
-3. Click **Start Auto-Apply**
-4. A Chrome browser window opens — **manually log into LinkedIn**
-5. After login, automation starts automatically
-6. Watch progress in the popup
-
-## Step 6: View Applications
-
-1. Click **Dashboard** in popup
-2. See all your applications in a table
-3. Filter by position, company, or status
-4. Export to CSV
-
----
-
-## Testing the API
-
-Test endpoints directly (backend must be running):
+## 4. Start the backend
 
 ```bash
-# List filters
-curl http://127.0.0.1:8899/api/v1/filters
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+source venv/bin/activate
+python -m uvicorn app.main:app --env-file .env --host 127.0.0.1 --port 8899
+```
 
-# List applications
-curl http://127.0.0.1:8899/api/v1/applications
+Verify:
 
-# Get automation status
-curl http://127.0.0.1:8899/api/v1/automation/status
-
-# Check health
+```bash
 curl http://127.0.0.1:8899/health
 ```
 
----
+Expected:
 
-## Common Issues
+```json
+{"status":"ok","app":"LinkedIn Job Assistant"}
+```
 
-**"Backend offline" in extension popup**
-- Backend server not running (check step 1)
-- Wrong port (should be 8899)
-- `curl http://127.0.0.1:8899/health` to verify
+## 5. Reload the extension
 
-**"Please log in to LinkedIn" message
-- Browser is waiting for you to log in manually
-- Open the browser window and enter your credentials
-- After login, automation will start
+After updating `.env`, go back to `chrome://extensions/` and click reload on the unpacked extension.
 
-**Applications not being created
-- Resume not uploaded yet (required)
-- Filter not selected (dropdown in popup)
-- Browser window closed during automation
+## 6. Create real local data
 
----
+In the extension:
 
-## Next Steps
+1. Open `Settings`
+2. Create a filter
+3. Upload a resume
 
-1. Review safety settings in Settings page
-2. Adjust rate limits if needed (default: 25 apps/day)
-3. Read full [README.md](./README.md) for detailed documentation
-4. Check [API reference](./docs/api-reference.md) for all endpoints
+In local config:
 
----
+1. Open `/Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend/data/config/form_answers.yaml`
+2. Replace the placeholder values with your real information
 
-Good luck with your job search! 🚀
+## 7. Start a run
+
+1. Open the extension popup
+2. Confirm backend status is connected
+3. Select a filter
+4. Click `Start Auto-Apply`
+5. Log into LinkedIn manually if prompted
+
+## Useful checks
+
+```bash
+curl http://127.0.0.1:8899/api/v1/filters
+curl http://127.0.0.1:8899/api/v1/resumes
+curl http://127.0.0.1:8899/api/v1/applications
+curl http://127.0.0.1:8899/api/v1/automation/status
+```
+
+## Common first-run failures
+
+### Popup says backend offline
+
+- Backend is not running
+- Backend was started without `--env-file .env`
+- `LJA_EXTENSION_ID` is missing or wrong
+- Extension was not reloaded after updating `.env`
+
+### Resume upload works locally, but nothing applies
+
+- No filter selected
+- No default resume uploaded
+- LinkedIn login not completed in the launched browser
+- Selectors or flow changed on LinkedIn
+
+### You expected existing DB data
+
+That data is not committed. This repo intentionally excludes:
+
+- local SQLite database
+- browser session/profile
+- resumes
+- logs
+- API key files
+
+For longer setup details, read `README.md`.
