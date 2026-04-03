@@ -8,7 +8,8 @@ def _build_cors_origins() -> list[str]:
     extension_id = os.environ.get("LJA_EXTENSION_ID", "")
     if extension_id:
         return [f"chrome-extension://{extension_id}", "http://localhost:8899"]
-    return ["chrome-extension://MOCK_EXTENSION_ID", "http://localhost:8899"]
+    # Development mode: allow all chrome extensions and localhost
+    return ["chrome-extension://*", "http://localhost:*"]
 
 
 class Settings(BaseSettings):

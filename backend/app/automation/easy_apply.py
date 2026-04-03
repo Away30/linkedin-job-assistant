@@ -82,7 +82,7 @@ class EasyApplyHandler:
         except Exception as e:
             logger.warning("_handle_resume_upload failed: %s", e)
 
-    async def click_next(self, page: Page) -> str:
+    async def click_next(self, page: Page, dry_run: bool = False) -> str:
         """Click Next, Review, or Submit button. Returns which action was taken."""
         try:
             # Check for Submit button first
@@ -94,6 +94,9 @@ class EasyApplyHandler:
             for selector in submit_selectors:
                 btn = await page.query_selector(selector)
                 if btn and await btn.is_visible():
+                    if dry_run:
+                        logger.info("Dry run: detected Submit button, skipping click")
+                        return "dry_run_submit"
                     await self.human.human_click(btn)
                     return "submitted"
 
@@ -190,15 +193,16 @@ class EasyApplyHandler:
 
             await self.human.random_delay(1, 3)
 
-            action = await self.click_next(page)
+            action = await self.click_next(page, dry_run=dry_run)
             result["steps_completed"] += 1
 
-            if action == "submitted":
-                if dry_run:
-                    logger.info("Dry run: skipping submit")
-                    result["errors"].append("dry_run: submit skipped")
-                    await self.dismiss_modal(page)
-                    break
+            if action == "dry_run_submit":
+                logger.info("Dry run: submit intercepted before click")
+                result["success"] = True
+                result["errors"].append("dry_run: submit skipped")
+                await self.dismiss_modal(page)
+                break
+            elif action == "submitted":
                 result["success"] = True
                 await self.human.random_delay(2, 4)
 
@@ -213,8 +217,12 @@ class EasyApplyHandler:
             elif action == "review":
                 await self.human.random_delay(2, 4)
                 # On review page, click submit
-                submit_action = await self.click_next(page)
-                if submit_action == "submitted":
+                submit_action = await self.click_next(page, dry_run=dry_run)
+                if submit_action == "dry_run_submit":
+                    result["success"] = True
+                    result["errors"].append("dry_run: submit skipped at review")
+                    await self.dismiss_modal(page)
+                elif submit_action == "submitted":
                     result["success"] = True
                     result["steps_completed"] += 1
                 break

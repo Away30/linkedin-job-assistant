@@ -16,6 +16,14 @@ let previousState = {
   dailyLimitReached: false,
 };
 
+// Unified API fetch helper — attaches API Key from storage
+async function apiFetch(path, options = {}) {
+  const { apiKey } = await chrome.storage.local.get("apiKey");
+  const headers = { ...(options.headers || {}), "Content-Type": "application/json" };
+  if (apiKey) headers["X-API-Key"] = apiKey;
+  return fetch(path.startsWith("http") ? path : `${BASE_URL}${path}`, { ...options, headers });
+}
+
 // Notification helper
 function sendNotification(title, message) {
   chrome.notifications.create({
@@ -65,9 +73,8 @@ async function handleMessage(request, sender, sendResponse) {
       }
 
       case "startAutomation": {
-        const startResp = await fetch(`${BACKEND_URL}/automation/start`, {
+        const startResp = await apiFetch(`${BACKEND_URL}/automation/start`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
         if (!startResp.ok) {
@@ -92,7 +99,7 @@ async function handleMessage(request, sender, sendResponse) {
       }
 
       case "stopAutomation": {
-        const stopResp = await fetch(`${BACKEND_URL}/automation/stop`, {
+        const stopResp = await apiFetch(`${BACKEND_URL}/automation/stop`, {
           method: "POST",
         });
         if (!stopResp.ok) {
@@ -113,7 +120,7 @@ async function handleMessage(request, sender, sendResponse) {
       }
 
       case "getStatus": {
-        const statusResp = await fetch(`${BACKEND_URL}/automation/status`);
+        const statusResp = await apiFetch(`${BACKEND_URL}/automation/status`);
         if (!statusResp.ok) {
           sendResponse({ success: false, error: `HTTP ${statusResp.status}` });
           break;
@@ -125,7 +132,7 @@ async function handleMessage(request, sender, sendResponse) {
 
       case "apiCall": {
         // Generic API proxy
-        const apiResp = await fetch(`${BACKEND_URL}${payload.endpoint}`, {
+        const apiResp = await apiFetch(`${BACKEND_URL}${payload.endpoint}`, {
           method: payload.method || "GET",
           headers: { "Content-Type": "application/json" },
           body: payload.body ? JSON.stringify(payload.body) : undefined,
@@ -182,7 +189,7 @@ async function pollAutomationStatus() {
   }
 
   try {
-    const response = await fetch(`${BACKEND_URL}/automation/status`);
+    const response = await apiFetch(`${BACKEND_URL}/automation/status`);
     const status = await response.json();
 
     automationState = {
