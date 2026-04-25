@@ -10,7 +10,7 @@ except ModuleNotFoundError:  # pragma: no cover - test env without playwright
 
 from app.automation.human_simulator import HumanSimulator
 from app.automation.form_filler import form_filler
-from app.automation.easy_apply_session import EasyApplyResult, EasyApplySession
+from app.automation.easy_apply_session import ACTION_LABEL_TOKENS, EasyApplyResult, EasyApplySession
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -169,12 +169,7 @@ class EasyApplyHandler:
 
     async def _click_session_action(self, session: EasyApplySession, action: str) -> bool:
         """Click the detected primary action inside the active modal footer."""
-        labels_by_action = {
-            "submit": ("submit", "提交"),
-            "review": ("review",),
-            "next": ("next", "continue", "继续"),
-        }
-        labels = labels_by_action.get(action, ())
+        labels = ACTION_LABEL_TOKENS.get(action, ())
         if not labels:
             return False
 
@@ -371,8 +366,8 @@ class EasyApplyHandler:
             if step_result.final_action == "submit" and dry_run:
                 cleanup_success = await self._cleanup_modal(page)
                 intercepted = EasyApplyResult(
-                    success=True,
-                    failure_type="submit_intercepted_dry_run",
+                    success=cleanup_success,
+                    failure_type="submit_intercepted_dry_run" if cleanup_success else "cleanup_not_confirmed",
                     final_action="submit",
                     cleanup_success=cleanup_success,
                     steps_completed=step + 1,
@@ -380,7 +375,12 @@ class EasyApplyHandler:
                     unresolved_fields=step_result.unresolved_fields,
                     validation_errors=step_result.validation_errors,
                 )
-                return self._to_payload(intercepted, errors=["dry_run: submit skipped"])
+                if cleanup_success:
+                    return self._to_payload(intercepted, errors=["dry_run: submit skipped"])
+                return self._to_payload(
+                    intercepted,
+                    errors=["dry_run: submit skipped but modal cleanup failed"],
+                )
 
             clicked = await self._click_session_action(session, step_result.final_action)
             if not clicked:

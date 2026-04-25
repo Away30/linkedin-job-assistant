@@ -17,6 +17,11 @@ FailureType = Literal[
     "cleanup_not_confirmed",
 ]
 FinalAction = Literal["submit", "review", "next", "blocked", "unknown"]
+ACTION_LABEL_TOKENS: dict[str, tuple[str, ...]] = {
+    "submit": ("submit", "提交", "投递"),
+    "review": ("review", "审核", "检查"),
+    "next": ("next", "continue", "继续", "下一步"),
+}
 
 
 class ModalButton(Protocol):
@@ -63,20 +68,16 @@ class EasyApplySession:
         buttons = await self.modal.query_selector_all("footer button")
         seen_actions: set[PrimaryAction] = set()
 
-        submit_tokens = ("submit", "提交", "投递")
-        review_tokens = ("review", "审核", "检查")
-        next_tokens = ("next", "continue", "继续", "下一步")
-
         for button in buttons:
             if not await button.is_visible():
                 continue
 
             text = (await button.inner_text()).strip().lower()
-            if any(token in text for token in submit_tokens):
+            if any(token in text for token in ACTION_LABEL_TOKENS["submit"]):
                 seen_actions.add("submit")
-            elif any(token in text for token in review_tokens):
+            elif any(token in text for token in ACTION_LABEL_TOKENS["review"]):
                 seen_actions.add("review")
-            elif any(token in text for token in next_tokens):
+            elif any(token in text for token in ACTION_LABEL_TOKENS["next"]):
                 seen_actions.add("next")
 
         for action in ("submit", "review", "next"):

@@ -120,10 +120,14 @@ async def test_apply_intercepts_submit_in_dry_run(monkeypatch):
             validation_errors=[],
         )
 
+    async def fake_cleanup_modal(page):
+        return True
+
     monkeypatch.setattr(handler, "_create_session", lambda page: session)
     monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
     monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
     monkeypatch.setattr(handler, "_fill_and_validate_step", fake_fill_and_validate_step)
+    monkeypatch.setattr(handler, "_cleanup_modal", fake_cleanup_modal)
 
     result = await handler.apply(page=object(), dry_run=True)
 
@@ -164,8 +168,8 @@ async def test_apply_reports_cleanup_failure_in_dry_run(monkeypatch):
 
     result = await handler.apply(page=object(), dry_run=True)
 
-    assert result["success"] is True
-    assert result["failure_type"] == "submit_intercepted_dry_run"
+    assert result["success"] is False
+    assert result["failure_type"] == "cleanup_not_confirmed"
     assert result["cleanup_success"] is False
 
 
@@ -383,3 +387,73 @@ async def test_is_modal_open_uses_easy_apply_specific_selectors():
 
     assert "[role=\"dialog\"]" not in observed["selector"]
     assert "jobs-easy-apply" in observed["selector"]
+
+
+@pytest.mark.asyncio
+async def test_apply_localized_submit_detects_and_clicks_action(monkeypatch):
+    handler = EasyApplyHandler()
+    clicked = {"value": False}
+
+    class FakeButton:
+        def __init__(self, text):
+            self._text = text
+
+        async def is_visible(self):
+            return True
+
+        async def inner_text(self):
+            return self._text
+
+        async def click(self):
+            clicked["value"] = True
+
+    class FakeModal:
+        async def query_selector_all(self, selector):
+            assert selector == "footer button"
+            return [FakeButton("投递申请")]
+
+        async def query_selector(self, selector):
+            return None
+
+    modal = FakeModal()
+    session = handler._create_session(modal)
+
+    async def fake_click_easy_apply_button(page):
+        return True
+
+    async def fake_is_modal_open(page):
+        return modal
+
+    async def fake_detect_and_fill_fields(container):
+        return {
+            "resolved_fields": ["Email"],
+            "unresolved_fields": [],
+            "validation_errors": [],
+        }
+
+    async def fake_confirm_submit_success(page):
+        return True
+
+    async def fake_short_delay():
+        return None
+
+    async def fake_random_delay(*args, **kwargs):
+        return None
+
+    async def fake_human_click(locator):
+        await locator.click()
+
+    monkeypatch.setattr(handler, "_create_session", lambda _: session)
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_confirm_submit_success", fake_confirm_submit_success)
+    monkeypatch.setattr("app.automation.easy_apply.form_filler.detect_and_fill_fields", fake_detect_and_fill_fields)
+    monkeypatch.setattr(handler.human, "short_delay", fake_short_delay)
+    monkeypatch.setattr(handler.human, "random_delay", fake_random_delay)
+    monkeypatch.setattr(handler.human, "human_click", fake_human_click)
+
+    result = await handler.apply(page=object(), dry_run=False, max_steps=1)
+
+    assert result["success"] is True
+    assert result["final_action"] == "submit"
+    assert clicked["value"] is True
