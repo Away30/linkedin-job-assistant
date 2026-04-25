@@ -28,7 +28,7 @@ class FakeModal:
         return self.buttons
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_detect_primary_action_prefers_submit_over_next():
     session = EasyApplySession(modal=FakeModal([
         FakeButton("Next"),
@@ -40,7 +40,41 @@ async def test_detect_primary_action_prefers_submit_over_next():
     assert action == "submit"
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
+async def test_detect_primary_action_returns_review_when_no_submit():
+    session = EasyApplySession(modal=FakeModal([
+        FakeButton("Review your application"),
+        FakeButton("Next"),
+    ]))
+
+    action = await session.detect_primary_action()
+
+    assert action == "review"
+
+
+@pytest.mark.asyncio
+async def test_detect_primary_action_maps_continue_to_next():
+    session = EasyApplySession(modal=FakeModal([
+        FakeButton("Continue to next step"),
+    ]))
+
+    action = await session.detect_primary_action()
+
+    assert action == "next"
+
+
+@pytest.mark.asyncio
+async def test_detect_primary_action_ignores_hidden_buttons_and_returns_unknown():
+    session = EasyApplySession(modal=FakeModal([
+        FakeButton("Submit application", visible=False),
+    ]))
+
+    action = await session.detect_primary_action()
+
+    assert action == "unknown"
+
+
+@pytest.mark.asyncio
 async def test_step_state_tracks_unresolved_and_validation_errors():
     session = EasyApplySession(modal=FakeModal([]))
     session.step_state = EasyApplyStepState(

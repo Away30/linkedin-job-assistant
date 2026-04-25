@@ -1,20 +1,61 @@
 """Fixtures for automation integration tests."""
+import asyncio
+import inspect
+
 import pytest
 
-try:
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from app.db.session import Base
-except ModuleNotFoundError:  # pragma: no cover - optional test dependency
-    create_engine = None
-    sessionmaker = None
-    Base = None
+create_engine = None
+sessionmaker = None
+Base = None
+
+
+def _load_db_dependencies() -> bool:
+    """Load DB fixtures lazily; only degrade when sqlalchemy is missing."""
+    global create_engine, sessionmaker, Base
+    if create_engine is not None and sessionmaker is not None and Base is not None:
+        return True
+
+    try:
+        from sqlalchemy import create_engine as loaded_create_engine
+        from sqlalchemy.orm import sessionmaker as loaded_sessionmaker
+        from app.db.session import Base as loaded_base
+    except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+        if exc.name == "sqlalchemy":
+            return False
+        raise
+
+    create_engine = loaded_create_engine
+    sessionmaker = loaded_sessionmaker
+    Base = loaded_base
+    return True
+
+
+def pytest_configure(config):
+    # Keep async marker consistent even when pytest-asyncio is unavailable.
+    config.addinivalue_line("markers", "asyncio: mark async test to run in asyncio loop")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):
+    if pyfuncitem.config.pluginmanager.hasplugin("asyncio"):
+        return None
+
+    if pyfuncitem.get_closest_marker("asyncio") is None:
+        return None
+
+    test_func = pyfuncitem.obj
+    if not inspect.iscoroutinefunction(test_func):
+        return None
+
+    test_kwargs = {name: pyfuncitem.funcargs[name] for name in pyfuncitem._fixtureinfo.argnames}
+    asyncio.run(test_func(**test_kwargs))
+    return True
 
 
 @pytest.fixture
 def db_session():
     """Provide a transient SQLite session for rate-limiter tests."""
-    if create_engine is None or sessionmaker is None or Base is None:
+    if not _load_db_dependencies():
         pytest.skip("sqlalchemy is required for db_session fixture")
 
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})

@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+PrimaryAction = Literal["submit", "review", "next", "unknown"]
+FailureType = Literal[
+    "field_unresolved",
+    "validation_error",
+    "modal_not_open",
+    "action_unknown",
+    "max_steps_reached",
+    "exception",
+]
+FinalAction = Literal["submitted", "review", "next", "blocked", "dismissed", "unknown"]
 
 
 class EasyApplyStepState(BaseModel):
@@ -21,8 +32,8 @@ class EasyApplyResult(BaseModel):
     """Structured result payload for one Easy Apply transaction."""
 
     success: bool
-    failure_type: str | None = None
-    final_action: str = "unknown"
+    failure_type: FailureType | None = None
+    final_action: FinalAction = "unknown"
     cleanup_success: bool = False
     steps_completed: int = 0
     resolved_fields: list[str] = Field(default_factory=list)
@@ -37,10 +48,10 @@ class EasyApplySession:
     modal: Any
     step_state: EasyApplyStepState = field(default_factory=EasyApplyStepState)
 
-    async def detect_primary_action(self) -> str:
+    async def detect_primary_action(self) -> PrimaryAction:
         """Detect the next primary footer action in priority order."""
         buttons = await self.modal.query_selector_all("footer button")
-        seen_actions: set[str] = set()
+        seen_actions: set[PrimaryAction] = set()
 
         for button in buttons:
             if not await button.is_visible():
