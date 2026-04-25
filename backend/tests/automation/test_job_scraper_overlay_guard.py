@@ -25,10 +25,24 @@ class FakeOverlay:
         return self.visible
 
 
+class FakeModal:
+    def __init__(self, visible: bool):
+        self.visible = visible
+
+    async def is_visible(self):
+        return self.visible
+
+
 class FakePage:
-    def __init__(self, overlay_states: list[bool], easy_apply_modal_open: bool = False):
+    def __init__(
+        self,
+        overlay_states: list[bool],
+        easy_apply_modal_open: bool = False,
+        raise_overlay_probe_error: bool = False,
+    ):
         self.overlays = [FakeOverlay(state) for state in overlay_states]
         self.easy_apply_modal_open = easy_apply_modal_open
+        self.raise_overlay_probe_error = raise_overlay_probe_error
         self.clicked = False
 
     async def query_selector(self, selector: str):
@@ -40,11 +54,13 @@ class FakePage:
 
     async def query_selector_all(self, selector: str):
         if selector == '[data-test-modal-container], .artdeco-modal-overlay':
+            if self.raise_overlay_probe_error:
+                raise RuntimeError("dom churn")
             return self.overlays
         if selector == ".jobs-unified-top-card__job-insight span":
             return []
         if "jobs-easy-apply-modal" in selector:
-            return [object()] if self.easy_apply_modal_open else []
+            return [FakeModal(True)] if self.easy_apply_modal_open else []
         return []
 
     async def wait_for_selector(self, selector: str, timeout: int):
@@ -96,6 +112,27 @@ async def test_scrape_job_detail_clicks_when_overlay_is_clear(monkeypatch):
 async def test_has_blocking_overlay_checks_all_overlay_matches():
     handler = EasyApplyHandler()
     page = FakePage(overlay_states=[False, True], easy_apply_modal_open=False)
+
+    result = await handler.has_blocking_overlay(page)
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_scrape_job_detail_stops_when_modal_is_open_without_overlay():
+    scraper = JobScraper()
+    page = FakePage(overlay_states=[], easy_apply_modal_open=True)
+
+    result = await scraper.scrape_job_detail(page, "123")
+
+    assert result is None
+    assert page.clicked is False
+
+
+@pytest.mark.asyncio
+async def test_has_blocking_overlay_fails_closed_on_overlay_probe_error():
+    handler = EasyApplyHandler()
+    page = FakePage(overlay_states=[], raise_overlay_probe_error=True)
 
     result = await handler.has_blocking_overlay(page)
 

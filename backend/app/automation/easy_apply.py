@@ -95,12 +95,13 @@ class EasyApplyHandler:
                     return True
         except Exception as e:
             logger.debug("Overlay probe failed: %s", e)
+            return True
 
         try:
             return bool(await self.is_modal_open(page))
         except Exception as e:
             logger.debug("Modal probe failed while checking blocking overlay: %s", e)
-            return False
+            return True
 
     async def get_current_step(self, page: Page) -> tuple[int, int]:
         """Get current step info. Uses iterative tracking, not progress estimation."""
