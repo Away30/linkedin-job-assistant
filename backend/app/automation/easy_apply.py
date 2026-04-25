@@ -61,12 +61,24 @@ class EasyApplyHandler:
             return False
 
     async def is_modal_open(self, page: Page) -> bool:
-        """Return active Easy Apply modal/container if open."""
-        return await page.query_selector(
+        """Return the active visible Easy Apply modal/container if open."""
+        selector = (
             '.jobs-easy-apply-modal, .jobs-easy-apply-content, '
             '[data-test-easy-apply-modal], .easy-apply-modal, '
             'div[aria-label*="Easy Apply"], div[aria-label*="快速申请"]'
         )
+        candidates = await page.query_selector_all(selector)
+        if not candidates:
+            return None
+
+        for candidate in reversed(candidates):
+            try:
+                if await candidate.is_visible():
+                    return candidate
+            except Exception:
+                continue
+
+        return None
 
     async def get_current_step(self, page: Page) -> tuple[int, int]:
         """Get current step info. Uses iterative tracking, not progress estimation."""
@@ -207,10 +219,20 @@ class EasyApplyHandler:
             if not await self.is_modal_open(page):
                 return True
 
-            close_btn = await page.query_selector('button[aria-label="Dismiss"], button:has-text("Done")')
-            if close_btn:
-                await close_btn.click()
-                await self.human.short_delay()
+            close_selectors = [
+                'button[aria-label="Dismiss"]',
+                'button[aria-label="关闭"]',
+                'button:has-text("Done")',
+                'button:has-text("完成")',
+                'button:has-text("关闭")',
+                'button:has-text("知道了")',
+            ]
+            for selector in close_selectors:
+                close_btn = await page.query_selector(selector)
+                if close_btn and await close_btn.is_visible():
+                    await close_btn.click()
+                    await self.human.short_delay()
+                    break
 
             return not bool(await self.is_modal_open(page))
         except Exception as e:

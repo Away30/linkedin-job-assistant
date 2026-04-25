@@ -379,14 +379,37 @@ async def test_is_modal_open_uses_easy_apply_specific_selectors():
     observed = {}
 
     class FakePage:
-        async def query_selector(self, selector):
+        async def query_selector_all(self, selector):
             observed["selector"] = selector
-            return None
+            return []
 
     await handler.is_modal_open(FakePage())
 
     assert "[role=\"dialog\"]" not in observed["selector"]
     assert "jobs-easy-apply" in observed["selector"]
+
+
+@pytest.mark.asyncio
+async def test_is_modal_open_prefers_visible_current_modal():
+    handler = EasyApplyHandler()
+
+    class FakeModal:
+        def __init__(self, visible):
+            self.visible = visible
+
+        async def is_visible(self):
+            return self.visible
+
+    hidden_modal = FakeModal(False)
+    visible_modal = FakeModal(True)
+
+    class FakePage:
+        async def query_selector_all(self, selector):
+            return [hidden_modal, visible_modal]
+
+    selected = await handler.is_modal_open(FakePage())
+
+    assert selected is visible_modal
 
 
 @pytest.mark.asyncio
@@ -457,3 +480,83 @@ async def test_apply_localized_submit_detects_and_clicks_action(monkeypatch):
     assert result["success"] is True
     assert result["final_action"] == "submit"
     assert clicked["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_apply_localized_submit_confirmation_uses_real_confirmation_logic(monkeypatch):
+    handler = EasyApplyHandler()
+    clicked_submit = {"value": False}
+    clicked_close = {"value": False}
+    state = {"modal_open": True}
+
+    class FakeButton:
+        def __init__(self, text, click_fn=None):
+            self._text = text
+            self._click_fn = click_fn
+
+        async def is_visible(self):
+            return True
+
+        async def inner_text(self):
+            return self._text
+
+        async def click(self):
+            if self._click_fn:
+                self._click_fn()
+
+    class FakeModal:
+        async def query_selector_all(self, selector):
+            assert selector == "footer button"
+            return [FakeButton("投递申请", click_fn=lambda: clicked_submit.update(value=True))]
+
+        async def query_selector(self, selector):
+            return None
+
+        async def is_visible(self):
+            return True
+
+    modal = FakeModal()
+    session = handler._create_session(modal)
+
+    class FakePage:
+        async def query_selector_all(self, selector):
+            if state["modal_open"]:
+                return [modal]
+            return []
+
+        async def query_selector(self, selector):
+            if "完成" in selector:
+                return FakeButton("完成", click_fn=lambda: (clicked_close.update(value=True), state.update(modal_open=False)))
+            return None
+
+    async def fake_click_easy_apply_button(page):
+        return True
+
+    async def fake_detect_and_fill_fields(container):
+        return {
+            "resolved_fields": ["Email"],
+            "unresolved_fields": [],
+            "validation_errors": [],
+        }
+
+    async def fake_short_delay():
+        return None
+
+    async def fake_random_delay(*args, **kwargs):
+        return None
+
+    async def fake_human_click(locator):
+        await locator.click()
+
+    monkeypatch.setattr(handler, "_create_session", lambda _: session)
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr("app.automation.easy_apply.form_filler.detect_and_fill_fields", fake_detect_and_fill_fields)
+    monkeypatch.setattr(handler.human, "short_delay", fake_short_delay)
+    monkeypatch.setattr(handler.human, "random_delay", fake_random_delay)
+    monkeypatch.setattr(handler.human, "human_click", fake_human_click)
+
+    result = await handler.apply(page=FakePage(), dry_run=False, max_steps=1)
+
+    assert result["success"] is True
+    assert clicked_submit["value"] is True
+    assert clicked_close["value"] is True
