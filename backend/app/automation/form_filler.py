@@ -255,7 +255,11 @@ class FormFiller:
             if hasattr(field, "is_enabled"):
                 is_enabled = await field.is_enabled()
 
-            return bool(is_visible and is_enabled)
+            readonly = await field.get_attribute("readonly")
+            aria_readonly = await field.get_attribute("aria-readonly")
+            is_readonly = (readonly is not None) or (str(aria_readonly).lower() == "true")
+
+            return bool(is_visible and is_enabled and not is_readonly)
         except Exception:
             return False
 

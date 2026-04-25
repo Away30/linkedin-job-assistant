@@ -11,12 +11,14 @@ class FakeElement:
         enabled: bool = True,
         visible: bool = True,
         required: bool = False,
+        readonly: bool = False,
     ):
         self.label = label
         self.field_type = field_type
         self.enabled = enabled
         self.visible = visible
         self.required = required
+        self.readonly = readonly
         self.value = None
 
     async def get_attribute(self, name: str):
@@ -26,6 +28,8 @@ class FakeElement:
             "id": self.label.lower().replace(" ", "-"),
             "required": "true" if self.required else None,
             "aria-required": "true" if self.required else None,
+            "readonly": "true" if self.readonly else None,
+            "aria-readonly": "true" if self.readonly else None,
         }
         return mapping.get(name)
 
@@ -48,8 +52,10 @@ class FakeContainer:
         self.selects = selects or []
         self.fieldsets = fieldsets or []
         self.checkboxes = checkboxes or []
+        self.query_calls = 0
 
     async def query_selector_all(self, selector: str):
+        self.query_calls += 1
         if selector.startswith('input[type="text"]'):
             return self.text_inputs
         if selector == "select":
@@ -74,6 +80,8 @@ async def test_detect_and_fill_fields_uses_only_modal_container():
     assert result["resolved_fields"] == ["Email"]
     assert result["unresolved_fields"] == []
     assert page_level_field.value is None
+    assert modal.query_calls > 0
+    assert page.query_calls == 0
 
 
 @pytest.mark.asyncio
@@ -87,3 +95,17 @@ async def test_unresolved_required_field_is_reported():
     assert result["resolved_fields"] == []
     assert result["unresolved_fields"] == ["Work authorization"]
     assert result["validation_errors"] == []
+
+
+@pytest.mark.asyncio
+async def test_readonly_text_field_is_treated_as_non_editable():
+    filler = FormFiller()
+    filler.form_answers = {"email": "away@example.com"}
+    readonly_field = FakeElement("Email", required=True, readonly=True)
+    modal = FakeContainer(text_inputs=[readonly_field])
+
+    result = await filler.detect_and_fill_fields(modal)
+
+    assert result["resolved_fields"] == []
+    assert result["unresolved_fields"] == []
+    assert readonly_field.value is None
