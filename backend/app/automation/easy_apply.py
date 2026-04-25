@@ -1,10 +1,16 @@
 """LinkedIn Easy Apply multi-step modal handler."""
 import logging
 from pathlib import Path
-from typing import Optional
-from playwright.async_api import Page
+from typing import Any, Optional
+
+try:
+    from playwright.async_api import Page
+except ModuleNotFoundError:  # pragma: no cover - test env without playwright
+    Page = Any
+
 from app.automation.human_simulator import HumanSimulator
 from app.automation.form_filler import form_filler
+from app.automation.easy_apply_session import EasyApplyResult, EasyApplySession
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -24,17 +30,30 @@ class EasyApplyHandler:
                 'button.jobs-apply-button',
                 '.jobs-apply-button--top-card button',
                 'button[aria-label*="Easy Apply"]',
+                'button[aria-label*="easy apply"]',
                 '.jobs-s-apply button',
+                'button[data-control-name*="apply"]',
             ]
 
             for selector in selectors:
                 btn = await page.query_selector(selector)
-                if btn:
-                    text = await btn.inner_text()
-                    if "easy apply" in text.lower() or "apply" in text.lower():
-                        await self.human.human_click(btn)
-                        await self.human.random_delay(2, 4)
-                        return True
+                if btn and await btn.is_visible():
+                    await self.human.human_click(btn)
+                    await self.human.random_delay(2, 4)
+                    return True
+
+            # Fallback: find any visible button containing "apply" text
+            apply_btns = await page.query_selector_all('button')
+            for btn in apply_btns:
+                try:
+                    if await btn.is_visible():
+                        text = (await btn.inner_text()).strip().lower()
+                        if "easy apply" in text or "apply" in text or "投递" in text:
+                            await self.human.human_click(btn)
+                            await self.human.random_delay(2, 4)
+                            return True
+                except Exception:
+                    continue
 
             return False
         except Exception as e:
@@ -42,9 +61,11 @@ class EasyApplyHandler:
             return False
 
     async def is_modal_open(self, page: Page) -> bool:
-        """Check if Easy Apply modal is open."""
-        modal = await page.query_selector('.jobs-easy-apply-modal, .jobs-easy-apply-content, [data-test-modal]')
-        return modal is not None
+        """Return active Easy Apply modal/container if open."""
+        return await page.query_selector(
+            '.jobs-easy-apply-modal, .jobs-easy-apply-content, '
+            '[data-test-modal], .easy-apply-modal, [role="dialog"]'
+        )
 
     async def get_current_step(self, page: Page) -> tuple[int, int]:
         """Get current step info. Uses iterative tracking, not progress estimation."""
@@ -62,13 +83,80 @@ class EasyApplyHandler:
                 await self._handle_resume_upload(page, resume_path)
 
             # Fill form fields
-            results = await form_filler.detect_and_fill_fields(page)
+            await form_filler.detect_and_fill_fields(page)
 
             await self.human.short_delay()
             return True
         except Exception as e:
             logger.warning("fill_current_step failed: %s", e)
             return False
+
+    def _create_session(self, modal: Any) -> EasyApplySession:
+        """Create a session wrapper around the active modal."""
+        return EasyApplySession(modal=modal)
+
+    async def _fill_and_validate_step(
+        self,
+        page: Page,
+        session: EasyApplySession,
+        resume_path: Optional[str],
+    ) -> EasyApplyResult:
+        """Fill current modal step and map structured field status into a step result."""
+        try:
+            await self.human.short_delay()
+            if resume_path:
+                await self._handle_resume_upload(session.modal, resume_path)
+
+            filled = await form_filler.detect_and_fill_fields(session.modal)
+            session.step_state.resolved_fields = list(filled.get("resolved_fields", []))
+            session.step_state.unresolved_fields = list(filled.get("unresolved_fields", []))
+            session.step_state.validation_errors = list(filled.get("validation_errors", []))
+
+            if session.step_state.unresolved_fields:
+                return EasyApplyResult(
+                    success=False,
+                    failure_type="field_unresolved",
+                    final_action="blocked",
+                    resolved_fields=session.step_state.resolved_fields,
+                    unresolved_fields=session.step_state.unresolved_fields,
+                    validation_errors=session.step_state.validation_errors,
+                )
+
+            if session.step_state.validation_errors:
+                return EasyApplyResult(
+                    success=False,
+                    failure_type="field_validation_failed",
+                    final_action="blocked",
+                    resolved_fields=session.step_state.resolved_fields,
+                    unresolved_fields=session.step_state.unresolved_fields,
+                    validation_errors=session.step_state.validation_errors,
+                )
+
+            action = await session.detect_primary_action()
+            if action not in ("next", "review", "submit"):
+                return EasyApplyResult(
+                    success=False,
+                    failure_type="advance_button_not_found",
+                    final_action="unknown",
+                    resolved_fields=session.step_state.resolved_fields,
+                    unresolved_fields=session.step_state.unresolved_fields,
+                    validation_errors=session.step_state.validation_errors,
+                )
+
+            return EasyApplyResult(
+                success=True,
+                final_action=action,
+                resolved_fields=session.step_state.resolved_fields,
+                unresolved_fields=session.step_state.unresolved_fields,
+                validation_errors=session.step_state.validation_errors,
+            )
+        except Exception as e:
+            logger.warning("_fill_and_validate_step failed: %s", e)
+            return EasyApplyResult(
+                success=False,
+                failure_type="advance_button_not_found",
+                final_action="unknown",
+            )
 
     async def _handle_resume_upload(self, page: Page, resume_path: str):
         """Upload resume if file input is present."""
@@ -82,14 +170,56 @@ class EasyApplyHandler:
         except Exception as e:
             logger.warning("_handle_resume_upload failed: %s", e)
 
+    async def _click_session_action(self, session: EasyApplySession, action: str) -> bool:
+        """Click the detected primary action inside the active modal footer."""
+        labels_by_action = {
+            "submit": ("submit", "提交"),
+            "review": ("review",),
+            "next": ("next", "continue", "继续"),
+        }
+        labels = labels_by_action.get(action, ())
+        if not labels:
+            return False
+
+        try:
+            buttons = await session.modal.query_selector_all("footer button")
+            for button in buttons:
+                if not await button.is_visible():
+                    continue
+                text = (await button.inner_text()).strip().lower()
+                if any(label in text for label in labels):
+                    await self.human.human_click(button)
+                    return True
+        except Exception as e:
+            logger.warning("_click_session_action failed: %s", e)
+
+        return False
+
+    async def _cleanup_modal(self, page: Page) -> bool:
+        """Best-effort modal cleanup after dry-run interception."""
+        try:
+            await self.dismiss_modal(page)
+            return True
+        except Exception as e:
+            logger.warning("_cleanup_modal failed: %s", e)
+            return False
+
+    @staticmethod
+    def _to_payload(step_result: EasyApplyResult, errors: Optional[list[str]] = None) -> dict:
+        payload = step_result.model_dump()
+        payload["errors"] = errors or []
+        return payload
+
     async def click_next(self, page: Page, dry_run: bool = False) -> str:
         """Click Next, Review, or Submit button. Returns which action was taken."""
         try:
             # Check for Submit button first
             submit_selectors = [
                 'button[aria-label="Submit application"]',
+                'button[aria-label="提交申请"]',
                 'button:has-text("Submit application")',
                 'button:has-text("Submit")',
+                'button:has-text("提交")',
             ]
             for selector in submit_selectors:
                 btn = await page.query_selector(selector)
@@ -104,6 +234,7 @@ class EasyApplyHandler:
             review_selectors = [
                 'button[aria-label="Review your application"]',
                 'button:has-text("Review")',
+                'button:has-text("Review your application")',
             ]
             for selector in review_selectors:
                 btn = await page.query_selector(selector)
@@ -115,6 +246,7 @@ class EasyApplyHandler:
             next_selectors = [
                 'button[aria-label="Continue to next step"]',
                 'button:has-text("Next")',
+                'button:has-text("Continue")',
                 'footer button.artdeco-button--primary',
             ]
             for selector in next_selectors:
@@ -164,76 +296,99 @@ class EasyApplyHandler:
             logger.warning("dismiss_modal failed: %s", e)
 
     async def apply(self, page: Page, resume_path: Optional[str] = None, max_steps: int = 10, dry_run: bool = False) -> dict:
-        """Complete the full Easy Apply flow."""
-        result = {
-            "success": False,
-            "steps_completed": 0,
-            "errors": [],
-        }
-
-        # Click Easy Apply button
+        """Run Easy Apply as a session with modal-scoped field validation."""
         if not await self.click_easy_apply_button(page):
-            result["errors"].append("Could not find Easy Apply button")
-            return result
+            return self._to_payload(
+                EasyApplyResult(success=False),
+                errors=["Could not find Easy Apply button"],
+            )
 
-        # Wait for modal
         await self.human.random_delay(2, 4)
-        if not await self.is_modal_open(page):
-            result["errors"].append("Easy Apply modal did not open")
-            return result
+        modal = await self.is_modal_open(page)
+        if not modal:
+            return self._to_payload(
+                EasyApplyResult(success=False, failure_type="modal_not_found"),
+                errors=["Easy Apply modal did not open"],
+            )
 
-        # Process steps
+        session = self._create_session(modal)
+
         for step in range(max_steps):
-            await self.fill_current_step(page, resume_path)
+            session.step_state.step_index = step + 1
+            step_result = await self._fill_and_validate_step(page, session, resume_path)
+            step_result.steps_completed = step + 1
 
-            # Check for errors
-            errors = await self.check_for_errors(page)
-            if errors:
-                result["errors"].extend(errors)
+            if session.step_state.unresolved_fields:
+                return self._to_payload(
+                    step_result,
+                    errors=[f"Unresolved required fields: {', '.join(session.step_state.unresolved_fields)}"],
+                )
+
+            if session.step_state.validation_errors:
+                return self._to_payload(
+                    step_result,
+                    errors=[f"Validation failed: {', '.join(session.step_state.validation_errors)}"],
+                )
+
+            if step_result.failure_type == "advance_button_not_found":
+                return self._to_payload(
+                    step_result,
+                    errors=["Could not find Next/Review/Submit button in modal footer"],
+                )
+
+            if step_result.final_action == "submit" and dry_run:
+                cleanup_success = await self._cleanup_modal(page)
+                intercepted = EasyApplyResult(
+                    success=True,
+                    failure_type="submit_intercepted_dry_run",
+                    final_action="submit",
+                    cleanup_success=cleanup_success,
+                    steps_completed=step + 1,
+                    resolved_fields=step_result.resolved_fields,
+                    unresolved_fields=step_result.unresolved_fields,
+                    validation_errors=step_result.validation_errors,
+                )
+                return self._to_payload(intercepted, errors=["dry_run: submit skipped"])
+
+            clicked = await self._click_session_action(session, step_result.final_action)
+            if not clicked:
+                failed_click = EasyApplyResult(
+                    success=False,
+                    failure_type="advance_button_not_found",
+                    final_action="unknown",
+                    steps_completed=step + 1,
+                    resolved_fields=step_result.resolved_fields,
+                    unresolved_fields=step_result.unresolved_fields,
+                    validation_errors=step_result.validation_errors,
+                )
+                return self._to_payload(
+                    failed_click,
+                    errors=["Detected action but failed to click modal footer button"],
+                )
+
+            if step_result.final_action == "submit":
+                submitted = EasyApplyResult(
+                    success=True,
+                    final_action="submit",
+                    steps_completed=step + 1,
+                    resolved_fields=step_result.resolved_fields,
+                    unresolved_fields=step_result.unresolved_fields,
+                    validation_errors=step_result.validation_errors,
+                )
+                return self._to_payload(submitted)
 
             await self.human.random_delay(1, 3)
 
-            action = await self.click_next(page, dry_run=dry_run)
-            result["steps_completed"] += 1
-
-            if action == "dry_run_submit":
-                logger.info("Dry run: submit intercepted before click")
-                result["success"] = True
-                result["errors"].append("dry_run: submit skipped")
-                await self.dismiss_modal(page)
-                break
-            elif action == "submitted":
-                result["success"] = True
-                await self.human.random_delay(2, 4)
-
-                # Handle post-submit modal (e.g., "Application sent")
-                try:
-                    close_btn = await page.query_selector('button[aria-label="Dismiss"], button:has-text("Done")')
-                    if close_btn:
-                        await close_btn.click()
-                except Exception as e:
-                    logger.warning("close post-submit modal failed: %s", e)
-                break
-            elif action == "review":
-                await self.human.random_delay(2, 4)
-                # On review page, click submit
-                submit_action = await self.click_next(page, dry_run=dry_run)
-                if submit_action == "dry_run_submit":
-                    result["success"] = True
-                    result["errors"].append("dry_run: submit skipped at review")
-                    await self.dismiss_modal(page)
-                elif submit_action == "submitted":
-                    result["success"] = True
-                    result["steps_completed"] += 1
-                break
-            elif action in ("error", "unknown"):
-                result["errors"].append(f"Failed at step {step + 1}: could not proceed")
-                await self.dismiss_modal(page)
-                break
-
-            await self.human.random_delay(2, 4)
-
-        return result
+        exhausted = EasyApplyResult(
+            success=False,
+            failure_type="advance_button_not_found",
+            final_action="unknown",
+            steps_completed=max_steps,
+            resolved_fields=session.step_state.resolved_fields,
+            unresolved_fields=session.step_state.unresolved_fields,
+            validation_errors=session.step_state.validation_errors,
+        )
+        return self._to_payload(exhausted, errors=[f"Exceeded max steps ({max_steps}) before submit"])
 
 
 easy_apply_handler = EasyApplyHandler()

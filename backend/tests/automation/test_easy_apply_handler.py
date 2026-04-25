@@ -1,0 +1,185 @@
+import sys
+import types
+
+import pytest
+
+playwright_module = types.ModuleType("playwright")
+playwright_async_api = types.ModuleType("playwright.async_api")
+playwright_async_api.Page = object
+playwright_async_api.Locator = object
+playwright_module.async_api = playwright_async_api
+sys.modules.setdefault("playwright", playwright_module)
+sys.modules.setdefault("playwright.async_api", playwright_async_api)
+
+from app.automation.easy_apply import EasyApplyHandler
+from app.automation.easy_apply_session import EasyApplyResult
+
+
+class StubSession:
+    def __init__(self, action: str, unresolved=None, validation_errors=None):
+        self.action = action
+        self.modal = object()
+        self.step_state = type(
+            "State",
+            (),
+            {
+                "resolved_fields": ["Email"],
+                "unresolved_fields": unresolved or [],
+                "validation_errors": validation_errors or [],
+            },
+        )()
+
+    async def detect_primary_action(self):
+        return self.action
+
+
+@pytest.mark.asyncio
+async def test_apply_blocks_when_unresolved_fields_exist(monkeypatch):
+    handler = EasyApplyHandler()
+    session = StubSession(action="next", unresolved=["Work authorization"])
+
+    async def fake_click_easy_apply_button(page):
+        return True
+
+    async def fake_is_modal_open(page):
+        return object()
+
+    async def fake_fill_and_validate_step(page, session, resume_path):
+        return EasyApplyResult(
+            success=False,
+            failure_type="field_unresolved",
+            final_action="blocked",
+            cleanup_success=False,
+            resolved_fields=["Email"],
+            unresolved_fields=["Work authorization"],
+            validation_errors=[],
+        )
+
+    monkeypatch.setattr(handler, "_create_session", lambda page: session)
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_fill_and_validate_step", fake_fill_and_validate_step)
+
+    result = await handler.apply(page=object(), dry_run=True)
+
+    assert result["success"] is False
+    assert result["failure_type"] == "field_unresolved"
+
+
+@pytest.mark.asyncio
+async def test_apply_blocks_when_validation_errors_exist(monkeypatch):
+    handler = EasyApplyHandler()
+    session = StubSession(action="next", validation_errors=["Invalid phone number"])
+
+    async def fake_click_easy_apply_button(page):
+        return True
+
+    async def fake_is_modal_open(page):
+        return object()
+
+    async def fake_fill_and_validate_step(page, session, resume_path):
+        return EasyApplyResult(
+            success=False,
+            failure_type="field_validation_failed",
+            final_action="blocked",
+            cleanup_success=False,
+            resolved_fields=["Email"],
+            unresolved_fields=[],
+            validation_errors=["Invalid phone number"],
+        )
+
+    monkeypatch.setattr(handler, "_create_session", lambda page: session)
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_fill_and_validate_step", fake_fill_and_validate_step)
+
+    result = await handler.apply(page=object(), dry_run=True)
+
+    assert result["success"] is False
+    assert result["failure_type"] == "field_validation_failed"
+
+
+@pytest.mark.asyncio
+async def test_apply_intercepts_submit_in_dry_run(monkeypatch):
+    handler = EasyApplyHandler()
+    session = StubSession(action="submit")
+
+    async def fake_click_easy_apply_button(page):
+        return True
+
+    async def fake_is_modal_open(page):
+        return object()
+
+    async def fake_fill_and_validate_step(page, session, resume_path):
+        return EasyApplyResult(
+            success=False,
+            final_action="submit",
+            cleanup_success=False,
+            resolved_fields=["Email"],
+            unresolved_fields=[],
+            validation_errors=[],
+        )
+
+    monkeypatch.setattr(handler, "_create_session", lambda page: session)
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_fill_and_validate_step", fake_fill_and_validate_step)
+
+    result = await handler.apply(page=object(), dry_run=True)
+
+    assert result["success"] is True
+    assert result["failure_type"] == "submit_intercepted_dry_run"
+    assert result["final_action"] == "submit"
+
+
+@pytest.mark.asyncio
+async def test_apply_returns_advance_button_not_found_when_no_action(monkeypatch):
+    handler = EasyApplyHandler()
+    session = StubSession(action="unknown")
+
+    async def fake_click_easy_apply_button(page):
+        return True
+
+    async def fake_is_modal_open(page):
+        return object()
+
+    monkeypatch.setattr(handler, "_create_session", lambda page: session)
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+
+    result = await handler.apply(page=object(), dry_run=False)
+
+    assert result["success"] is False
+    assert result["failure_type"] == "advance_button_not_found"
+
+
+@pytest.mark.asyncio
+async def test_fill_and_validate_step_uses_modal_scope(monkeypatch):
+    handler = EasyApplyHandler()
+    modal = object()
+    page = object()
+
+    class SessionWithModal(StubSession):
+        def __init__(self):
+            super().__init__(action="next")
+            self.modal = modal
+
+    session = SessionWithModal()
+
+    called_with = {}
+
+    async def fake_detect_and_fill_fields(container):
+        called_with["container"] = container
+        return {
+            "resolved_fields": ["Email"],
+            "unresolved_fields": [],
+            "validation_errors": [],
+        }
+
+    monkeypatch.setattr("app.automation.easy_apply.form_filler.detect_and_fill_fields", fake_detect_and_fill_fields)
+
+    result = await handler._fill_and_validate_step(page=page, session=session, resume_path=None)
+
+    assert called_with["container"] is modal
+    assert result.success is True
+    assert result.final_action == "next"
