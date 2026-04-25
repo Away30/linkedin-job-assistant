@@ -5,8 +5,25 @@ import re
 from pathlib import Path
 from typing import Optional, Any
 import yaml
-from playwright.async_api import Page, Locator
-from app.automation.human_simulator import HumanSimulator
+
+try:
+    from playwright.async_api import Page, Locator
+except ModuleNotFoundError:  # pragma: no cover - test env without playwright
+    Page = Any
+    Locator = Any
+
+try:
+    from app.automation.human_simulator import HumanSimulator
+except ModuleNotFoundError:  # pragma: no cover - test env without playwright
+    class HumanSimulator:
+        async def short_delay(self):
+            return None
+
+        async def type_like_human(self, locator: Any, text: str):
+            await locator.fill(text)
+
+        async def human_click(self, locator: Any):
+            await locator.click()
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -86,10 +103,25 @@ class FormFiller:
             return False
 
         try:
+            # Validate number fields — skip if answer is not a positive number
+            input_type = await locator.get_attribute("type") or ""
+            if input_type == "number":
+                try:
+                    val = float(answer)
+                    if val <= 0:
+                        logger.debug("Skipping number field '%s': value %s <= 0", label, answer)
+                        return False
+                except ValueError:
+                    logger.debug("Skipping number field '%s': '%s' is not a number", label, answer)
+                    return False
+
             await locator.click()
             await locator.fill("")  # Clear first
             await self.human.short_delay()
-            await self.human.type_like_human(locator, answer)
+            try:
+                await self.human.type_like_human(locator, answer)
+            except Exception:
+                await locator.fill(answer)
             return True
         except Exception as e:
             logger.warning("fill_text_field failed for '%s': %s", label, e)
@@ -183,48 +215,55 @@ class FormFiller:
             logger.warning("fill_checkbox_field failed for '%s': %s", label, e)
             return False
 
-    async def detect_and_fill_fields(self, page: Page) -> dict[str, bool]:
-        """Detect all form fields on the page and attempt to fill them."""
-        results = {}
+    async def detect_and_fill_fields(self, container: Page) -> dict[str, list[str]]:
+        """Detect and fill visible/editable text fields inside a modal/container."""
+        result = {
+            "resolved_fields": [],
+            "unresolved_fields": [],
+            "validation_errors": [],
+        }
 
-        # Text inputs
-        text_inputs = await page.query_selector_all('input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="url"], textarea')
-        for inp in text_inputs:
-            label = await self._get_field_label(page, inp)
-            if label:
-                inp_id = await inp.get_attribute("id")
-                locator = page.locator(f'#{inp_id}') if inp_id else inp
-                results[label] = await self.fill_text_field(page, locator, label)
+        text_inputs = await container.query_selector_all(
+            'input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="url"], textarea'
+        )
+        for field in text_inputs:
+            if not await self._is_visible_and_editable(field):
+                continue
 
-        # Select dropdowns
-        selects = await page.query_selector_all('select')
-        for sel in selects:
-            label = await self._get_field_label(page, sel)
-            if label:
-                sel_id = await sel.get_attribute("id")
-                if sel_id:
-                    locator = page.locator(f'#{sel_id}')
-                    results[label] = await self.fill_select_field(page, locator, label)
+            label = await self._get_field_label(container, field)
+            if not label:
+                continue
 
-        # Radio groups
-        fieldsets = await page.query_selector_all('fieldset')
-        for fs in fieldsets:
-            legend = await fs.query_selector('legend, .fb-dash-form-element__label')
-            if legend:
-                label = (await legend.inner_text()).strip()
-                locator = page.locator(f'fieldset:has-text("{label[:30]}")')
-                results[label] = await self.fill_radio_field(page, locator, label)
+            filled = await self.fill_text_field(container, field, label)
+            if filled:
+                result["resolved_fields"].append(label)
+                continue
 
-        # Standalone checkboxes (e.g., "I agree to terms")
-        checkboxes = await page.query_selector_all('input[type="checkbox"]')
-        for cb in checkboxes:
-            cb_id = await cb.get_attribute("id")
-            label = await self._get_field_label(page, cb)
-            if label and cb_id:
-                locator = page.locator(f'#{cb_id}')
-                results[label] = await self.fill_checkbox_field(page, locator, label)
+            if await self._is_required_field(field):
+                result["unresolved_fields"].append(label)
 
-        return results
+        return result
+
+    async def _is_visible_and_editable(self, field: Any) -> bool:
+        """Return True when field is visible and enabled/editable."""
+        try:
+            is_visible = True
+            if hasattr(field, "is_visible"):
+                is_visible = await field.is_visible()
+
+            is_enabled = True
+            if hasattr(field, "is_enabled"):
+                is_enabled = await field.is_enabled()
+
+            return bool(is_visible and is_enabled)
+        except Exception:
+            return False
+
+    async def _is_required_field(self, field: Any) -> bool:
+        """Check if a field is explicitly marked as required."""
+        required = await field.get_attribute("required")
+        aria_required = await field.get_attribute("aria-required")
+        return (required is not None) or (str(aria_required).lower() == "true")
 
     async def _get_field_label(self, page, element) -> str:
         """Get the label text for a form element."""
