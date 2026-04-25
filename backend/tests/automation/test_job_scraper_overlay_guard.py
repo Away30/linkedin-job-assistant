@@ -14,18 +14,40 @@ if "playwright.async_api" not in sys.modules:
     sys.modules["playwright.async_api"] = async_api_module
 
 from app.automation.job_scraper import JobScraper
+from app.automation.easy_apply import EasyApplyHandler
+
+
+class FakeOverlay:
+    def __init__(self, visible: bool):
+        self.visible = visible
+
+    async def is_visible(self):
+        return self.visible
 
 
 class FakePage:
-    def __init__(self, overlay_visible: bool):
-        self.overlay_visible = overlay_visible
+    def __init__(self, overlay_states: list[bool], easy_apply_modal_open: bool = False):
+        self.overlays = [FakeOverlay(state) for state in overlay_states]
+        self.easy_apply_modal_open = easy_apply_modal_open
         self.clicked = False
 
     async def query_selector(self, selector: str):
         if selector == '[data-test-modal-container], .artdeco-modal-overlay':
-            return object() if self.overlay_visible else None
+            return self.overlays[0] if self.overlays else None
         if selector == '[data-job-id="123"]':
             return self
+        return None
+
+    async def query_selector_all(self, selector: str):
+        if selector == '[data-test-modal-container], .artdeco-modal-overlay':
+            return self.overlays
+        if selector == ".jobs-unified-top-card__job-insight span":
+            return []
+        if "jobs-easy-apply-modal" in selector:
+            return [object()] if self.easy_apply_modal_open else []
+        return []
+
+    async def wait_for_selector(self, selector: str, timeout: int):
         return None
 
     async def click(self):
@@ -35,7 +57,7 @@ class FakePage:
 @pytest.mark.asyncio
 async def test_scrape_job_detail_stops_when_overlay_is_still_open():
     scraper = JobScraper()
-    page = FakePage(overlay_visible=True)
+    page = FakePage(overlay_states=[True])
 
     result = await scraper.scrape_job_detail(page, "123")
 
@@ -44,10 +66,37 @@ async def test_scrape_job_detail_stops_when_overlay_is_still_open():
 
 
 @pytest.mark.asyncio
-async def test_guard_overlay_returns_true_when_page_is_clear():
+async def test_scrape_job_detail_clicks_when_overlay_is_clear(monkeypatch):
     scraper = JobScraper()
-    page = FakePage(overlay_visible=False)
+    page = FakePage(overlay_states=[])
 
-    result = await scraper._guard_overlay(page)
+    async def fake_click(card):
+        await card.click()
+
+    async def no_delay(*args, **kwargs):
+        return None
+
+    async def fake_get_text(_page, selector):
+        if "job-title" in selector:
+            return "Backend Engineer"
+        return ""
+
+    monkeypatch.setattr(scraper.human, "human_click", fake_click)
+    monkeypatch.setattr(scraper.human, "random_delay", no_delay)
+    monkeypatch.setattr(scraper, "_get_text", fake_get_text)
+
+    result = await scraper.scrape_job_detail(page, "123")
+
+    assert result is not None
+    assert result.linkedin_job_id == "123"
+    assert page.clicked is True
+
+
+@pytest.mark.asyncio
+async def test_has_blocking_overlay_checks_all_overlay_matches():
+    handler = EasyApplyHandler()
+    page = FakePage(overlay_states=[False, True], easy_apply_modal_open=False)
+
+    result = await handler.has_blocking_overlay(page)
 
     assert result is True

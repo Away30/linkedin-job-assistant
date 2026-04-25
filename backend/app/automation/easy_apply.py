@@ -85,11 +85,13 @@ class EasyApplyHandler:
     async def has_blocking_overlay(self, page: Page) -> bool:
         """Return True when an Easy Apply overlay/modal is still blocking the jobs list."""
         try:
-            overlay = await page.query_selector(EASY_APPLY_OVERLAY_GUARD_SELECTOR)
-            if overlay:
+            overlays = await page.query_selector_all(EASY_APPLY_OVERLAY_GUARD_SELECTOR)
+            for overlay in overlays:
                 try:
-                    return bool(await overlay.is_visible())
+                    if await overlay.is_visible():
+                        return True
                 except Exception:
+                    # If visibility probing fails, treat as potentially blocking.
                     return True
         except Exception as e:
             logger.debug("Overlay probe failed: %s", e)
