@@ -150,8 +150,8 @@ class EasyApplyHandler:
             logger.warning("_fill_and_validate_step failed: %s", e)
             return EasyApplyResult(
                 success=False,
-                failure_type="advance_button_not_found",
-                final_action="unknown",
+                final_action="blocked",
+                validation_errors=[f"unexpected_step_error:{e.__class__.__name__}"],
             )
 
     async def _handle_resume_upload(self, page: Page, resume_path: str):
@@ -194,10 +194,31 @@ class EasyApplyHandler:
     async def _cleanup_modal(self, page: Page) -> bool:
         """Best-effort modal cleanup after dry-run interception."""
         try:
+            if not await self.is_modal_open(page):
+                return True
+
             await self.dismiss_modal(page)
-            return True
+            await self.human.short_delay()
+            return not bool(await self.is_modal_open(page))
         except Exception as e:
             logger.warning("_cleanup_modal failed: %s", e)
+            return False
+
+    async def _confirm_submit_success(self, page: Page) -> bool:
+        """Confirm submit moved the flow forward by closing modal or showing terminal dialog."""
+        try:
+            await self.human.random_delay(1, 2)
+            if not await self.is_modal_open(page):
+                return True
+
+            close_btn = await page.query_selector('button[aria-label="Dismiss"], button:has-text("Done")')
+            if close_btn:
+                await close_btn.click()
+                await self.human.short_delay()
+
+            return not bool(await self.is_modal_open(page))
+        except Exception as e:
+            logger.warning("_confirm_submit_success failed: %s", e)
             return False
 
     @staticmethod
@@ -332,6 +353,12 @@ class EasyApplyHandler:
                     errors=["Could not find Next/Review/Submit button in modal footer"],
                 )
 
+            if not step_result.success and step_result.failure_type is None:
+                errors = ["Unexpected step failure before detecting advance button"]
+                if step_result.validation_errors:
+                    errors.append("; ".join(step_result.validation_errors))
+                return self._to_payload(step_result, errors=errors)
+
             if step_result.final_action == "submit" and dry_run:
                 cleanup_success = await self._cleanup_modal(page)
                 intercepted = EasyApplyResult(
@@ -363,6 +390,22 @@ class EasyApplyHandler:
                 )
 
             if step_result.final_action == "submit":
+                confirmed = await self._confirm_submit_success(page)
+                if not confirmed:
+                    submit_unconfirmed = EasyApplyResult(
+                        success=False,
+                        failure_type="cleanup_not_confirmed",
+                        final_action="submit",
+                        steps_completed=step + 1,
+                        resolved_fields=step_result.resolved_fields,
+                        unresolved_fields=step_result.unresolved_fields,
+                        validation_errors=step_result.validation_errors,
+                    )
+                    return self._to_payload(
+                        submit_unconfirmed,
+                        errors=["Submit click did not confirm completion or modal close"],
+                    )
+
                 submitted = EasyApplyResult(
                     success=True,
                     final_action="submit",
