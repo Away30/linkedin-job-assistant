@@ -58,18 +58,6 @@ class FakeLabel:
         return self.text
 
 
-class FakeCollection:
-    def __init__(self, elements):
-        self._elements = elements
-
-    async def all(self):
-        return self._elements
-
-    @property
-    def first(self):
-        return self._elements[0]
-
-
 class FakeOption:
     def __init__(self, value: str, text: str):
         self.value = value
@@ -90,10 +78,10 @@ class FakeSelect(FakeElement):
         self.options = options
         self.selected = None
 
-    def locator(self, selector: str):
+    async def query_selector_all(self, selector: str):
         if selector == "option":
-            return FakeCollection(self.options)
-        return FakeCollection([])
+            return self.options
+        return []
 
     async def select_option(self, value: str = None, label: str = None):
         if value is not None:
@@ -129,15 +117,17 @@ class FakeFieldset(FakeElement):
     async def query_selector(self, selector: str):
         if selector.startswith("legend"):
             return FakeLabel(self.legend)
+        prefix = 'label[for="'
+        if selector.startswith(prefix) and selector.endswith('"]'):
+            radio_id = selector[len(prefix):-2]
+            if radio_id in self.radio_labels:
+                return FakeLabel(self.radio_labels[radio_id])
         return None
 
-    def locator(self, selector: str):
+    async def query_selector_all(self, selector: str):
         if selector == 'input[type="radio"]':
-            return FakeCollection(self.radios)
-        if selector.startswith('label[for="'):
-            radio_id = selector[len('label[for="'):-2]
-            return FakeCollection([FakeLabel(self.radio_labels[radio_id])])
-        return FakeCollection([])
+            return self.radios
+        return []
 
 
 class FakeContainer:
@@ -278,3 +268,24 @@ async def test_label_for_lookup_path_is_used_when_no_aria_label():
 
     assert result["resolved_fields"] == ["Email"]
     assert input_field.value == "away@example.com"
+
+
+@pytest.mark.asyncio
+async def test_required_radio_group_unresolved_when_required_on_inputs():
+    filler = FormFiller()
+    filler.form_answers = {}
+    radio_yes = FakeElement("remote", field_type="radio", element_id="work-model-remote", required=True)
+    radio_no = FakeElement("onsite", field_type="radio", element_id="work-model-onsite")
+    fieldset = FakeFieldset(
+        legend="Work Model",
+        radios=[radio_yes, radio_no],
+        radio_labels={
+            "work-model-remote": "Remote",
+            "work-model-onsite": "Onsite",
+        },
+    )
+    modal = FakeContainer(fieldsets=[fieldset])
+
+    result = await filler.detect_and_fill_fields(modal)
+
+    assert "Work Model" in result["unresolved_fields"]

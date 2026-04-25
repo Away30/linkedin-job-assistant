@@ -135,7 +135,7 @@ class FormFiller:
 
         try:
             # Try to find matching option
-            options = await locator.locator("option").all()
+            options = await locator.query_selector_all("option")
             answer_lower = answer.lower()
 
             best_match = None
@@ -182,14 +182,14 @@ class FormFiller:
 
         try:
             answer_lower = answer.lower()
-            radios = await fieldset.locator('input[type="radio"]').all()
+            radios = await fieldset.query_selector_all('input[type="radio"]')
 
             for radio in radios:
                 # Get associated label
                 radio_id = await radio.get_attribute("id")
                 if radio_id:
-                    radio_label = await fieldset.locator(f'label[for="{radio_id}"]').first.inner_text()
-                    if answer_lower in radio_label.lower():
+                    radio_label = await self._get_radio_label(fieldset, radio_id)
+                    if radio_label and answer_lower in radio_label.lower():
                         await self.human.human_click(radio)
                         return True
 
@@ -286,7 +286,7 @@ class FormFiller:
                 self._append_once(result["resolved_fields"], label)
                 continue
 
-            if await self._is_required_field(fieldset):
+            if await self._is_required_field(fieldset) or await self._fieldset_has_required_radio(fieldset):
                 self._append_once(result["unresolved_fields"], label)
 
         # Standalone checkboxes
@@ -333,6 +333,33 @@ class FormFiller:
             return f"{label}: answer must be non-negative"
 
         return None
+
+    async def _fieldset_has_required_radio(self, fieldset: Any) -> bool:
+        """Return True when any radio inside the fieldset is required."""
+        try:
+            radios = await fieldset.query_selector_all('input[type="radio"]')
+            for radio in radios:
+                if await self._is_required_field(radio):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    async def _get_radio_label(self, fieldset: Any, radio_id: str) -> str:
+        """Get label text for a radio input from fieldset-local label bindings."""
+        try:
+            label_el = await fieldset.query_selector(f'label[for="{radio_id}"]')
+            if label_el:
+                return (await label_el.inner_text()).strip()
+        except Exception:
+            pass
+
+        # Test fallback hook for simple fakes that expose a helper.
+        if hasattr(fieldset, "get_radio_label"):
+            text = await fieldset.get_radio_label(radio_id)
+            return (text or "").strip()
+
+        return ""
 
     async def _is_visible_and_editable(self, field: Any) -> bool:
         """Return True when field is visible and enabled/editable."""
