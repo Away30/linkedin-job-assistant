@@ -15,6 +15,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+EASY_APPLY_OVERLAY_GUARD_SELECTOR = '[data-test-modal-container], .artdeco-modal-overlay'
+
 
 class EasyApplyHandler:
     """Handles the LinkedIn Easy Apply modal flow."""
@@ -79,6 +81,24 @@ class EasyApplyHandler:
                 continue
 
         return None
+
+    async def has_blocking_overlay(self, page: Page) -> bool:
+        """Return True when an Easy Apply overlay/modal is still blocking the jobs list."""
+        try:
+            overlay = await page.query_selector(EASY_APPLY_OVERLAY_GUARD_SELECTOR)
+            if overlay:
+                try:
+                    return bool(await overlay.is_visible())
+                except Exception:
+                    return True
+        except Exception as e:
+            logger.debug("Overlay probe failed: %s", e)
+
+        try:
+            return bool(await self.is_modal_open(page))
+        except Exception as e:
+            logger.debug("Modal probe failed while checking blocking overlay: %s", e)
+            return False
 
     async def get_current_step(self, page: Page) -> tuple[int, int]:
         """Get current step info. Uses iterative tracking, not progress estimation."""

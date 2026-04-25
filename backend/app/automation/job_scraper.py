@@ -1,9 +1,15 @@
 """Extract job data from LinkedIn job detail pages."""
 import asyncio
 import logging
-from typing import Optional
-from playwright.async_api import Page
+from typing import Any, Optional
+
+try:
+    from playwright.async_api import Page
+except ModuleNotFoundError:  # pragma: no cover - test env without playwright
+    Page = Any
+
 from app.automation.human_simulator import HumanSimulator
+from app.automation.easy_apply import easy_apply_handler
 from app.schemas.schemas import JobCreate
 
 logger = logging.getLogger(__name__)
@@ -15,9 +21,23 @@ class JobScraper:
     def __init__(self):
         self.human = HumanSimulator()
 
+    async def _guard_overlay(self, page: Page) -> bool:
+        """Gate next job interaction until Easy Apply overlay/modal is fully cleared."""
+        try:
+            if await easy_apply_handler.has_blocking_overlay(page):
+                logger.warning("Blocking Easy Apply overlay is still open; skipping next job click")
+                return False
+            return True
+        except Exception as e:
+            logger.warning("Overlay guard failed; stopping job scrape to avoid polluted clicks: %s", e)
+            return False
+
     async def scrape_job_detail(self, page: Page, linkedin_job_id: str) -> Optional[JobCreate]:
         """Click on a job card and extract full details."""
         try:
+            if not await self._guard_overlay(page):
+                return None
+
             # Click the job card to load details
             card = await page.query_selector(f'[data-job-id="{linkedin_job_id}"]')
             if not card:
@@ -100,6 +120,8 @@ class JobScraper:
         """Scrape details for a list of job IDs from search results."""
         jobs = []
         for job_id in job_ids:
+            if not await self._guard_overlay(page):
+                break
             job = await self.scrape_job_detail(page, job_id)
             if job:
                 jobs.append(job)
