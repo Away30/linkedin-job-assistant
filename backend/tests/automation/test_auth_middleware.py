@@ -1,6 +1,8 @@
 """Test API key authentication middleware."""
 import pytest
 
+pytest.importorskip("sqlalchemy", reason="sqlalchemy is required for app-backed auth middleware tests")
+
 
 def test_health_no_auth_required(client):
     """Health endpoint should work without API key."""
