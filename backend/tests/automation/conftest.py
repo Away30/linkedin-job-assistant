@@ -1,5 +1,6 @@
 """Fixtures for automation integration tests."""
 import asyncio
+import importlib.util
 import inspect
 
 import pytest
@@ -7,6 +8,8 @@ import pytest
 create_engine = None
 sessionmaker = None
 Base = None
+SQLALCHEMY_AVAILABLE = importlib.util.find_spec("sqlalchemy") is not None
+SQLALCHEMY_TEST_MODULES = {"test_rate_limiter.py"}
 
 
 def _load_db_dependencies() -> bool:
@@ -50,6 +53,18 @@ def pytest_pyfunc_call(pyfuncitem):
     test_kwargs = {name: pyfuncitem.funcargs[name] for name in pyfuncitem._fixtureinfo.argnames}
     asyncio.run(test_func(**test_kwargs))
     return True
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip only known SQLAlchemy-dependent automation modules when unavailable."""
+    if SQLALCHEMY_AVAILABLE:
+        return
+
+    skip_sqlalchemy = pytest.mark.skip(reason="sqlalchemy is required for DB-backed automation tests")
+    for item in items:
+        module_name = item.nodeid.split("::", 1)[0].rsplit("/", 1)[-1]
+        if module_name in SQLALCHEMY_TEST_MODULES:
+            item.add_marker(skip_sqlalchemy)
 
 
 @pytest.fixture

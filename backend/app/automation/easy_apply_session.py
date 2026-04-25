@@ -3,20 +3,30 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 PrimaryAction = Literal["submit", "review", "next", "unknown"]
 FailureType = Literal[
     "field_unresolved",
-    "validation_error",
-    "modal_not_open",
-    "action_unknown",
-    "max_steps_reached",
-    "exception",
+    "field_validation_failed",
+    "submit_intercepted_dry_run",
+    "advance_button_not_found",
+    "modal_not_found",
+    "cleanup_not_confirmed",
 ]
-FinalAction = Literal["submitted", "review", "next", "blocked", "dismissed", "unknown"]
+FinalAction = Literal["submit", "review", "next", "blocked", "unknown"]
+
+
+class ModalButton(Protocol):
+    async def is_visible(self) -> bool: ...
+
+    async def inner_text(self) -> str: ...
+
+
+class EasyApplyModal(Protocol):
+    async def query_selector_all(self, selector: str) -> list[ModalButton]: ...
 
 
 class EasyApplyStepState(BaseModel):
@@ -45,7 +55,7 @@ class EasyApplyResult(BaseModel):
 class EasyApplySession:
     """Holds modal state and action detection logic for one apply flow."""
 
-    modal: Any
+    modal: EasyApplyModal
     step_state: EasyApplyStepState = field(default_factory=EasyApplyStepState)
 
     async def detect_primary_action(self) -> PrimaryAction:
