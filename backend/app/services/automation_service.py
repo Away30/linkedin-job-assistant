@@ -4,8 +4,8 @@ import logging
 import random
 import uuid
 import time
-from datetime import datetime, date, timezone
-from typing import Optional
+from datetime import datetime, date
+from typing import Optional, Any
 from app.config import settings
 from app.schemas.schemas import AutomationStartRequest, AutomationStatus
 from app.db.session import SessionLocal
@@ -73,6 +73,45 @@ class AutomationService:
         except Exception as e:
             logger.warning("Failed to log operation: %s", e)
             db.rollback()
+
+    @staticmethod
+    def _extract_structured_apply_outcome(result: dict[str, Any]) -> dict[str, Any]:
+        """Keep diagnosable apply metadata in a stable structure for persistence."""
+        return {
+            "final_action": result.get("final_action") or "unknown",
+            "failure_type": result.get("failure_type"),
+            "cleanup_success": bool(result.get("cleanup_success", False)),
+            "resolved_fields": list(result.get("resolved_fields") or []),
+            "unresolved_fields": list(result.get("unresolved_fields") or []),
+            "validation_errors": list(result.get("validation_errors") or []),
+        }
+
+    @staticmethod
+    def _build_error_message(result: dict[str, Any], structured_outcome: dict[str, Any]) -> Optional[str]:
+        """Prefer structured failure type + details over generic string blobs."""
+        errors = [str(item) for item in (result.get("errors") or []) if item]
+        details = "; ".join(errors)
+        failure_type = structured_outcome.get("failure_type")
+        if failure_type:
+            return f"{failure_type}: {details}" if details else str(failure_type)
+        if details:
+            return details
+        if not result.get("success"):
+            return "apply_failed_without_details"
+        return None
+
+    def _build_application_record(self, job_id: int, resume_id: Optional[int], result: dict[str, Any]) -> Application:
+        """Build a persisted application record from an apply result payload."""
+        structured_outcome = self._extract_structured_apply_outcome(result)
+        return Application(
+            job_id=job_id,
+            resume_id=resume_id,
+            status="applied" if result.get("success") else "failed",
+            apply_method="easy_apply",
+            form_answers=structured_outcome,
+            error_message=self._build_error_message(result, structured_outcome),
+            applied_at=datetime.utcnow() if result.get("success") else None,
+        )
 
     async def _run_session(self, request: AutomationStartRequest):
         """Main automation loop with its own DB session."""
@@ -303,16 +342,30 @@ class AutomationService:
                 result = await easy_apply_handler.apply(page, resume_path=resume_path, dry_run=request.dry_run)
 
                 # Record application
-                app = Application(
+                structured_outcome = self._extract_structured_apply_outcome(result)
+                app = self._build_application_record(
                     job_id=db_job.id,
                     resume_id=request.resume_id,
-                    status="applied" if result["success"] else "failed",
-                    apply_method="easy_apply",
-                    error_message="; ".join(result["errors"]) if result["errors"] else None,
-                    applied_at=datetime.now(timezone.utc) if result["success"] else None,
+                    result=result,
                 )
                 db.add(app)
                 db.commit()
+
+                logger.info(
+                    (
+                        "Apply outcome for '%s' at '%s': success=%s final_action=%s "
+                        "failure_type=%s cleanup_success=%s resolved=%d unresolved=%d validation_errors=%d"
+                    ),
+                    job_data.title,
+                    job_data.company,
+                    result["success"],
+                    structured_outcome["final_action"],
+                    structured_outcome["failure_type"],
+                    structured_outcome["cleanup_success"],
+                    len(structured_outcome["resolved_fields"]),
+                    len(structured_outcome["unresolved_fields"]),
+                    len(structured_outcome["validation_errors"]),
+                )
 
                 if result["success"]:
                     applied_count += 1
@@ -322,7 +375,17 @@ class AutomationService:
                     logger.info("Successfully applied to %s", job_data.title)
                 else:
                     self._status.jobs_failed += 1
-                    self._log_operation(db, "apply", f"Failed: {job_data.title} - {result['errors']}", "failed")
+                    self._log_operation(
+                        db,
+                        "apply",
+                        (
+                            f"Failed: {job_data.title} - final_action={structured_outcome['final_action']} "
+                            f"failure_type={structured_outcome['failure_type']} "
+                            f"unresolved={structured_outcome['unresolved_fields']} "
+                            f"validation_errors={structured_outcome['validation_errors']}"
+                        ),
+                        "failed",
+                    )
                     logger.warning("Failed to apply to %s: %s", job_data.title, result["errors"])
 
                 self._status.daily_applies_remaining = rate_limiter.get_daily_remaining(db)
