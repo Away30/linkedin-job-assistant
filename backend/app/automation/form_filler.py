@@ -108,8 +108,8 @@ class FormFiller:
             if input_type == "number":
                 try:
                     val = float(answer)
-                    if val <= 0:
-                        logger.debug("Skipping number field '%s': value %s <= 0", label, answer)
+                    if val < 0:
+                        logger.debug("Skipping number field '%s': value %s < 0", label, answer)
                         return False
                 except ValueError:
                     logger.debug("Skipping number field '%s': '%s' is not a number", label, answer)
@@ -216,7 +216,7 @@ class FormFiller:
             return False
 
     async def detect_and_fill_fields(self, container: Page) -> dict[str, list[str]]:
-        """Detect and fill visible/editable text fields inside a modal/container."""
+        """Detect and fill visible/editable fields inside a modal/container."""
         result = {
             "resolved_fields": [],
             "unresolved_fields": [],
@@ -234,15 +234,105 @@ class FormFiller:
             if not label:
                 continue
 
+            text_validation_error = await self._validate_text_field_answer(field, label)
+            if text_validation_error:
+                self._append_once(result["validation_errors"], text_validation_error)
+                if await self._is_required_field(field):
+                    self._append_once(result["unresolved_fields"], label)
+                continue
+
             filled = await self.fill_text_field(container, field, label)
             if filled:
-                result["resolved_fields"].append(label)
+                self._append_once(result["resolved_fields"], label)
                 continue
 
             if await self._is_required_field(field):
-                result["unresolved_fields"].append(label)
+                self._append_once(result["unresolved_fields"], label)
+
+        # Select dropdowns
+        selects = await container.query_selector_all("select")
+        for field in selects:
+            if not await self._is_visible_and_editable(field):
+                continue
+
+            label = await self._get_field_label(container, field)
+            if not label:
+                continue
+
+            filled = await self.fill_select_field(container, field, label)
+            if filled:
+                self._append_once(result["resolved_fields"], label)
+                continue
+
+            if await self._is_required_field(field):
+                self._append_once(result["unresolved_fields"], label)
+
+        # Radio groups
+        fieldsets = await container.query_selector_all("fieldset")
+        for fieldset in fieldsets:
+            if not await self._is_visible_and_editable(fieldset):
+                continue
+
+            legend = await fieldset.query_selector("legend, .fb-dash-form-element__label")
+            if not legend:
+                continue
+
+            label = (await legend.inner_text()).strip()
+            if not label:
+                continue
+
+            filled = await self.fill_radio_field(container, fieldset, label)
+            if filled:
+                self._append_once(result["resolved_fields"], label)
+                continue
+
+            if await self._is_required_field(fieldset):
+                self._append_once(result["unresolved_fields"], label)
+
+        # Standalone checkboxes
+        checkboxes = await container.query_selector_all('input[type="checkbox"]')
+        for field in checkboxes:
+            if not await self._is_visible_and_editable(field):
+                continue
+
+            label = await self._get_field_label(container, field)
+            if not label:
+                continue
+
+            filled = await self.fill_checkbox_field(container, field, label)
+            if filled:
+                self._append_once(result["resolved_fields"], label)
+                continue
+
+            if await self._is_required_field(field):
+                self._append_once(result["unresolved_fields"], label)
 
         return result
+
+    @staticmethod
+    def _append_once(items: list[str], value: str):
+        if value not in items:
+            items.append(value)
+
+    async def _validate_text_field_answer(self, field: Any, label: str) -> Optional[str]:
+        """Return local validation error for a text field answer, if any."""
+        answer = self._find_answer(label)
+        if answer is None:
+            return None
+
+        input_type = await field.get_attribute("type") or ""
+        if input_type != "number":
+            return None
+
+        try:
+            value = float(answer)
+        except ValueError:
+            return f"{label}: answer must be numeric"
+
+        if value < 0:
+            return f"{label}: answer must be non-negative"
+
+        return None
 
     async def _is_visible_and_editable(self, field: Any) -> bool:
         """Return True when field is visible and enabled/editable."""
