@@ -74,19 +74,15 @@ class EasyApplyHandler:
         return (1, 1)
 
     async def fill_current_step(self, page: Page, resume_path: Optional[str] = None) -> bool:
-        """Fill all fields in the current step of the Easy Apply form."""
+        """Back-compat wrapper that fills the active modal step only."""
         try:
-            await self.human.short_delay()
+            modal = await self.is_modal_open(page)
+            if not modal:
+                return False
 
-            # Handle resume upload if file input present
-            if resume_path:
-                await self._handle_resume_upload(page, resume_path)
-
-            # Fill form fields
-            await form_filler.detect_and_fill_fields(page)
-
-            await self.human.short_delay()
-            return True
+            session = self._create_session(modal)
+            result = await self._fill_and_validate_step(page, session, resume_path)
+            return result.success
         except Exception as e:
             logger.warning("fill_current_step failed: %s", e)
             return False
