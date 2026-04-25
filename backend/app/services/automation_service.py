@@ -45,7 +45,7 @@ class AutomationService:
         self._status = AutomationStatus(
             is_running=True,
             session_id=self.session_id,
-            status_message="Starting automation...",
+            status_message="正在启动自动投递...",
         )
 
         self._task = asyncio.create_task(self._run_session(request))
@@ -56,7 +56,7 @@ class AutomationService:
             self._stop_event.set()
             self.is_running = False
             self._status.is_running = False
-            self._status.status_message = "Stopped by user"
+            self._status.status_message = "已手动停止"
             if self._task and not self._task.done():
                 self._task.cancel()
 
@@ -113,6 +113,26 @@ class AutomationService:
             applied_at=datetime.utcnow() if result.get("success") else None,
         )
 
+    def _build_apply_operation_details(
+        self,
+        job_title: str,
+        company: Optional[str],
+        result: dict[str, Any],
+        structured_outcome: Optional[dict[str, Any]] = None,
+    ) -> str:
+        """Build a single structured apply diagnostic string for logs and persisted operation trails."""
+        outcome = structured_outcome or self._extract_structured_apply_outcome(result)
+        return (
+            f"Apply outcome: {job_title} at {company or 'Unknown company'} - "
+            f"success={bool(result.get('success'))} "
+            f"final_action={outcome['final_action']} "
+            f"failure_type={outcome['failure_type']} "
+            f"cleanup_success={outcome['cleanup_success']} "
+            f"resolved_fields={outcome['resolved_fields']} "
+            f"unresolved_fields={outcome['unresolved_fields']} "
+            f"validation_errors={outcome['validation_errors']}"
+        )
+
     async def _run_session(self, request: AutomationStartRequest):
         """Main automation loop with its own DB session."""
         db = SessionLocal()
@@ -121,13 +141,13 @@ class AutomationService:
             await self._execute(db, request)
         except Exception as e:
             logger.exception("Session error")
-            self._status.status_message = f"Error: {str(e)}"
+            self._status.status_message = f"错误：{str(e)}"
             self._log_operation(db, "session", f"Session error: {e}", "error")
         finally:
             self.is_running = False
             self._status.is_running = False
             if not self._status.status_message:
-                self._status.status_message = "Session completed"
+                self._status.status_message = "投递会话已完成"
             db.close()
 
     async def _execute(self, db, request: AutomationStartRequest):
@@ -143,15 +163,15 @@ class AutomationService:
 
         try:
             # Step 1: Launch browser
-            self._status.status_message = "Launching browser..."
+            self._status.status_message = "正在启动浏览器..."
             logger.info("Launching browser")
             page = await browser_manager.launch(headless=False)
 
             # Step 2: Check login
-            self._status.status_message = "Checking LinkedIn login..."
+            self._status.status_message = "正在检查 LinkedIn 登录状态..."
             logger.info("Checking login status")
             if not await linkedin_auth.ensure_logged_in():
-                self._status.status_message = "Login required - please log in manually"
+                self._status.status_message = "请在浏览器中手动登录 LinkedIn..."
                 self._log_operation(db, "auth", "Login timeout", "failed")
                 return
 
@@ -177,7 +197,7 @@ class AutomationService:
                     resume_path = default_resume.file_path
 
             # Step 5: Search for jobs
-            self._status.status_message = f"Searching for '{keywords}' jobs..."
+            self._status.status_message = f"正在搜索「{keywords}」职位..."
             logger.info("Searching jobs: keywords=%s location=%s", keywords, location)
             all_job_ids = await job_searcher.search(
                 page, keywords=keywords, location=location,
@@ -190,7 +210,7 @@ class AutomationService:
             while pages_loaded < max_pages and await job_searcher.has_more_pages(page):
                 if self._stop_event.is_set():
                     break
-                self._status.status_message = f"Loading page {pages_loaded + 1}..."
+                self._status.status_message = f"正在加载第 {pages_loaded + 1} 页..."
                 logger.info("Loading page %d", pages_loaded + 1)
                 next_ids = await job_searcher.next_page(page)
                 if next_ids:
@@ -205,7 +225,7 @@ class AutomationService:
             self._log_operation(db, "search", f"Found {len(all_job_ids)} jobs across {pages_loaded} pages for '{keywords}'", "success")
 
             if not all_job_ids:
-                self._status.status_message = "No jobs found matching criteria"
+                self._status.status_message = "未找到符合条件的职位"
                 return
 
             # Step 6: Iterate and apply
@@ -215,28 +235,28 @@ class AutomationService:
 
             for idx, job_id in enumerate(all_job_ids):
                 if self._stop_event.is_set():
-                    self._status.status_message = "Stopped by user"
+                    self._status.status_message = "已手动停止"
                     break
                 if applied_count >= max_applies:
-                    self._status.status_message = f"Reached limit of {max_applies} applications"
+                    self._status.status_message = f"已达到 {max_applies} 次投递上限"
                     break
 
                 # Check session time limit
                 elapsed_min = (time.time() - self._start_time) / 60
                 if elapsed_min > settings.MAX_SESSION_MINUTES:
-                    self._status.status_message = "Session time limit reached"
+                    self._status.status_message = "已达到会话时间上限"
                     break
 
                 # CAPTCHA check
                 if await captcha_detector.is_captcha_present(page):
-                    self._status.status_message = "CAPTCHA detected! Please solve it in the browser window..."
+                    self._status.status_message = "检测到验证码！请在浏览器窗口中手动完成验证..."
                     self._log_operation(db, "captcha", "CAPTCHA detected, waiting for user", "warning")
                     if await captcha_detector.wait_for_captcha_solved(page, timeout=120):
                         self._log_operation(db, "captcha", "CAPTCHA solved", "success")
-                        self._status.status_message = "CAPTCHA solved, continuing..."
+                        self._status.status_message = "验证码已通过，继续投递..."
                     else:
                         self._log_operation(db, "captcha", "CAPTCHA not solved, stopping", "failed")
-                        self._status.status_message = "CAPTCHA not solved, session stopped"
+                        self._status.status_message = "验证码未通过，会话已停止"
                         break
 
                 # Break interval check
@@ -252,7 +272,7 @@ class AutomationService:
                             settings.BREAK_DURATION_MINUTES_MAX,
                         )
                         logger.info("Taking a %.1f minute break", break_duration)
-                        self._status.status_message = f"Taking a {int(break_duration)} min break..."
+                        self._status.status_message = f"休息 {int(break_duration)} 分钟..."
                         self._log_operation(db, "break", f"Taking {break_duration:.1f} min break", "success")
                         break_seconds = int(break_duration * 60)
                         for _ in range(break_seconds):
@@ -271,12 +291,13 @@ class AutomationService:
 
                 # Scrape job details
                 job_num = idx + 1
-                self._status.status_message = f"Reviewing job {job_num}/{len(all_job_ids)}..."
+                self._status.status_message = f"正在评估职位 {job_num}/{len(all_job_ids)}..."
                 logger.info("Reviewing job %s", job_id)
                 job_data = await job_scraper.scrape_job_detail(page, job_id)
 
                 if not job_data:
                     self._status.jobs_skipped += 1
+                    logger.info("SKIP #%d job_id=%s: scrape returned None", idx + 1, job_id)
                     continue
 
                 # Save job to DB
@@ -295,7 +316,7 @@ class AutomationService:
                 ).first()
                 if existing_app:
                     self._status.jobs_skipped += 1
-                    logger.info("Skipping already applied: %s", job_data.title)
+                    logger.info("SKIP #%d '%s': already applied", idx + 1, job_data.title)
                     continue
 
                 # Check blacklist
@@ -305,37 +326,45 @@ class AutomationService:
                     ).first()
                     if blacklisted:
                         self._status.jobs_skipped += 1
-                        logger.info("Skipping blacklisted company: %s", job_data.company)
+                        logger.info("SKIP #%d '%s': company '%s' blacklisted", idx + 1, job_data.title, job_data.company)
                         continue
 
-                # Check Easy Apply
-                if not job_data.is_easy_apply:
+                # Check Easy Apply — skip check if search already filtered for Easy Apply
+                search_used_easy_apply = (
+                    (search_filter and search_filter.easy_apply_only)
+                    or (not search_filter)  # default search uses easy_apply=True
+                )
+                if not search_used_easy_apply and not job_data.is_easy_apply:
                     self._status.jobs_skipped += 1
-                    logger.info("Skipping non-Easy Apply: %s", job_data.title)
+                    logger.info("SKIP #%d '%s': not Easy Apply", idx + 1, job_data.title)
                     continue
 
-                # Score job against required skills
-                match_score = 0
+                # Score job — only filter when user explicitly configured required_skills
+                from app.automation.job_matcher import job_matcher
+
                 if search_filter and search_filter.required_skills:
-                    from app.automation.job_matcher import job_matcher
                     req_skills = [s.strip() for s in search_filter.required_skills.split(",") if s.strip()]
                     pref_skills = [s.strip() for s in (search_filter.preferred_skills or "").split(",") if s.strip()]
                     min_score = search_filter.min_match_score or 40
                     match_score = job_matcher.score_job(job_data, req_skills, pref_skills or None)
+                else:
+                    # No required_skills configured → skip matching, accept all jobs
+                    match_score = 100
+                    min_score = 0
 
-                    # Update DB record with score
-                    db_job.match_score = match_score
-                    db.commit()
+                # Update DB record with score
+                db_job.match_score = match_score
+                db.commit()
 
-                    if match_score < min_score:
-                        self._status.jobs_skipped += 1
-                        logger.info("Skipping low match (%d%%): %s", match_score, job_data.title)
-                        continue
+                if min_score > 0 and match_score < min_score:
+                    self._status.jobs_skipped += 1
+                    logger.info("SKIP #%d '%s': match_score=%d < min_score=%d", idx + 1, job_data.title, match_score, min_score)
+                    continue
 
-                    logger.info("Job match score: %d%% for %s", match_score, job_data.title)
+                logger.info("Job match score: %d%% for %s", match_score, job_data.title)
 
                 self._status.current_job = f"{job_data.title} at {job_data.company} ({match_score}%)"
-                self._status.status_message = f"Applying to {job_data.title}..."
+                self._status.status_message = f"正在投递：{job_data.title}..."
                 logger.info("Applying to: %s at %s", job_data.title, job_data.company)
 
                 # Apply
@@ -350,42 +379,28 @@ class AutomationService:
                 )
                 db.add(app)
                 db.commit()
-
-                logger.info(
-                    (
-                        "Apply outcome for '%s' at '%s': success=%s final_action=%s "
-                        "failure_type=%s cleanup_success=%s resolved=%d unresolved=%d validation_errors=%d"
-                    ),
-                    job_data.title,
-                    job_data.company,
-                    result["success"],
-                    structured_outcome["final_action"],
-                    structured_outcome["failure_type"],
-                    structured_outcome["cleanup_success"],
-                    len(structured_outcome["resolved_fields"]),
-                    len(structured_outcome["unresolved_fields"]),
-                    len(structured_outcome["validation_errors"]),
+                apply_operation_details = self._build_apply_operation_details(
+                    job_title=job_data.title,
+                    company=job_data.company,
+                    result=result,
+                    structured_outcome=structured_outcome,
                 )
+
+                logger.info(apply_operation_details)
 
                 if result["success"]:
                     applied_count += 1
                     last_apply_time = time.time()
                     self._status.jobs_applied += 1
-                    self._log_operation(db, "apply", f"Applied to {job_data.title} at {job_data.company}", "success")
+                    self._log_operation(db, "apply", apply_operation_details, "success")
                     logger.info("Successfully applied to %s", job_data.title)
+
+                    # Post-apply networking hook
+                    if request.enable_networking and job_data.company:
+                        await self._network_after_apply(page, db, job_data, db_job.id)
                 else:
                     self._status.jobs_failed += 1
-                    self._log_operation(
-                        db,
-                        "apply",
-                        (
-                            f"Failed: {job_data.title} - final_action={structured_outcome['final_action']} "
-                            f"failure_type={structured_outcome['failure_type']} "
-                            f"unresolved={structured_outcome['unresolved_fields']} "
-                            f"validation_errors={structured_outcome['validation_errors']}"
-                        ),
-                        "failed",
-                    )
+                    self._log_operation(db, "apply", apply_operation_details, "failed")
                     logger.warning("Failed to apply to %s: %s", job_data.title, result["errors"])
 
                 self._status.daily_applies_remaining = rate_limiter.get_daily_remaining(db)
@@ -404,6 +419,36 @@ class AutomationService:
                 await browser_manager.close()
             except Exception:
                 pass
+
+    async def _network_after_apply(self, page, db, job_data, job_id: int):
+        """Post-apply networking: find and connect with recruiters."""
+        from app.automation.networking.networking_service import networking_service
+
+        try:
+            self._status.status_message = f"正在搜索 {job_data.company} 的 recruiter..."
+            from app.config import settings as app_settings
+            results = await networking_service.network_after_apply(
+                page=page,
+                company=job_data.company,
+                role_title=job_data.title or "",
+                job_id=job_id,
+                db=db,
+                max_connects=app_settings.NETWORKING_MAX_PER_SESSION,
+                person_types=[t.strip() for t in app_settings.NETWORKING_PERSON_TYPES.split(",")],
+            )
+            sent_count = sum(1 for r in results if r.get("success"))
+            self._status.connections_sent += sent_count
+            if sent_count > 0:
+                self._log_operation(
+                    db, "connect",
+                    f"Sent {sent_count} connection requests at {job_data.company}",
+                    "success",
+                )
+                logger.info("Sent %d connections at %s", sent_count, job_data.company)
+        except Exception as e:
+            logger.warning("Networking failed for %s: %s", job_data.company, e)
+            self._log_operation(db, "connect", f"Networking failed: {e}", "failed")
+            # Don't fail the main session
 
 
 # Singleton
