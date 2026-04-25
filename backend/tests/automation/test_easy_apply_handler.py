@@ -325,3 +325,61 @@ async def test_fill_and_validate_step_reports_unexpected_error(monkeypatch):
     assert result.failure_type is None
     assert result.final_action == "blocked"
     assert result.validation_errors == ["unexpected_step_error:ValueError"]
+
+
+@pytest.mark.asyncio
+async def test_apply_refreshes_modal_handle_between_steps(monkeypatch):
+    handler = EasyApplyHandler()
+    session = StubSession(action="next")
+    modal_a = object()
+    modal_b = object()
+    seen_modals = []
+    step_counter = {"count": 0}
+    modal_sequence = iter([modal_a, modal_a, modal_b])
+
+    async def fake_click_easy_apply_button(page):
+        return True
+
+    async def fake_is_modal_open(page):
+        return next(modal_sequence)
+
+    async def fake_fill_and_validate_step(page, session, resume_path):
+        seen_modals.append(session.modal)
+        if step_counter["count"] == 0:
+            step_counter["count"] += 1
+            return EasyApplyResult(success=True, final_action="next")
+        return EasyApplyResult(success=True, final_action="submit")
+
+    async def fake_click_session_action(session, action):
+        return True
+
+    async def fake_cleanup_modal(page):
+        return True
+
+    monkeypatch.setattr(handler, "_create_session", lambda page: session)
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_fill_and_validate_step", fake_fill_and_validate_step)
+    monkeypatch.setattr(handler, "_click_session_action", fake_click_session_action)
+    monkeypatch.setattr(handler, "_cleanup_modal", fake_cleanup_modal)
+
+    result = await handler.apply(page=object(), dry_run=True, max_steps=3)
+
+    assert result["success"] is True
+    assert seen_modals == [modal_a, modal_b]
+
+
+@pytest.mark.asyncio
+async def test_is_modal_open_uses_easy_apply_specific_selectors():
+    handler = EasyApplyHandler()
+    observed = {}
+
+    class FakePage:
+        async def query_selector(self, selector):
+            observed["selector"] = selector
+            return None
+
+    await handler.is_modal_open(FakePage())
+
+    assert "[role=\"dialog\"]" not in observed["selector"]
+    assert "jobs-easy-apply" in observed["selector"]

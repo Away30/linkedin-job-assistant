@@ -64,7 +64,8 @@ class EasyApplyHandler:
         """Return active Easy Apply modal/container if open."""
         return await page.query_selector(
             '.jobs-easy-apply-modal, .jobs-easy-apply-content, '
-            '[data-test-modal], .easy-apply-modal, [role="dialog"]'
+            '[data-test-easy-apply-modal], .easy-apply-modal, '
+            'div[aria-label*="Easy Apply"], div[aria-label*="快速申请"]'
         )
 
     async def get_current_step(self, page: Page) -> tuple[int, int]:
@@ -331,6 +332,14 @@ class EasyApplyHandler:
         session = self._create_session(modal)
 
         for step in range(max_steps):
+            # LinkedIn often re-renders the dialog between steps; always refresh modal handle.
+            current_modal = await self.is_modal_open(page)
+            if not current_modal:
+                return self._to_payload(
+                    EasyApplyResult(success=False, failure_type="modal_not_found"),
+                    errors=["Easy Apply modal was replaced or closed before step processing"],
+                )
+            session.modal = current_modal
             session.step_state.step_index = step + 1
             step_result = await self._fill_and_validate_step(page, session, resume_path)
             step_result.steps_completed = step + 1

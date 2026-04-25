@@ -75,6 +75,29 @@ async def test_detect_primary_action_ignores_hidden_buttons_and_returns_unknown(
 
 
 @pytest.mark.asyncio
+async def test_detect_primary_action_supports_chinese_submit_label():
+    session = EasyApplySession(modal=FakeModal([
+        FakeButton("继续"),
+        FakeButton("提交申请"),
+    ]))
+
+    action = await session.detect_primary_action()
+
+    assert action == "submit"
+
+
+@pytest.mark.asyncio
+async def test_detect_primary_action_supports_chinese_next_label():
+    session = EasyApplySession(modal=FakeModal([
+        FakeButton("继续下一步"),
+    ]))
+
+    action = await session.detect_primary_action()
+
+    assert action == "next"
+
+
+@pytest.mark.asyncio
 async def test_step_state_tracks_unresolved_and_validation_errors():
     session = EasyApplySession(modal=FakeModal([]))
     session.step_state = EasyApplyStepState(

@@ -63,16 +63,20 @@ class EasyApplySession:
         buttons = await self.modal.query_selector_all("footer button")
         seen_actions: set[PrimaryAction] = set()
 
+        submit_tokens = ("submit", "提交", "投递")
+        review_tokens = ("review", "审核", "检查")
+        next_tokens = ("next", "continue", "继续", "下一步")
+
         for button in buttons:
             if not await button.is_visible():
                 continue
 
             text = (await button.inner_text()).strip().lower()
-            if "submit" in text:
+            if any(token in text for token in submit_tokens):
                 seen_actions.add("submit")
-            elif "review" in text:
+            elif any(token in text for token in review_tokens):
                 seen_actions.add("review")
-            elif "next" in text or "continue" in text:
+            elif any(token in text for token in next_tokens):
                 seen_actions.add("next")
 
         for action in ("submit", "review", "next"):
