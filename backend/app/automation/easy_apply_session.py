@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 class EasyApplyStepState(BaseModel):
     """Current state for a single Easy Apply modal step."""
 
-    step_index: int = 0
+    step_index: int = 1
     resolved_fields: list[str] = Field(default_factory=list)
     unresolved_fields: list[str] = Field(default_factory=list)
     validation_errors: list[str] = Field(default_factory=list)
@@ -23,7 +23,7 @@ class EasyApplyResult(BaseModel):
     success: bool
     failure_type: str | None = None
     final_action: str = "unknown"
-    cleanup_success: bool = True
+    cleanup_success: bool = False
     steps_completed: int = 0
     resolved_fields: list[str] = Field(default_factory=list)
     unresolved_fields: list[str] = Field(default_factory=list)
