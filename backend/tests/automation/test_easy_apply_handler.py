@@ -67,6 +67,74 @@ async def test_apply_blocks_when_unresolved_fields_exist(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_apply_attempts_cleanup_on_unresolved_failure(monkeypatch):
+    handler = EasyApplyHandler()
+    cleaned = {"called": False}
+
+    async def fake_click_easy_apply_button(page):
+        return True
+
+    async def fake_is_modal_open(page):
+        return object()
+
+    async def fake_fill_and_validate_step(page, session, resume_path):
+        return EasyApplyResult(
+            success=False,
+            failure_type="field_unresolved",
+            final_action="blocked",
+            cleanup_success=False,
+            resolved_fields=["Phone"],
+            unresolved_fields=["Code pays"],
+            validation_errors=[],
+        )
+
+    async def fake_cleanup_modal(page):
+        cleaned["called"] = True
+        return True
+
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_fill_and_validate_step", fake_fill_and_validate_step)
+    monkeypatch.setattr(handler, "_cleanup_modal", fake_cleanup_modal)
+
+    result = await handler.apply(page=object(), dry_run=True)
+
+    assert result["failure_type"] == "field_unresolved"
+    assert cleaned["called"] is True
+
+
+@pytest.mark.asyncio
+async def test_apply_continues_when_easy_apply_modal_is_already_open(monkeypatch):
+    handler = EasyApplyHandler()
+    modal = object()
+
+    async def fake_click_easy_apply_button(page):
+        return False
+
+    async def fake_is_modal_open(page):
+        return modal
+
+    async def fake_fill_and_validate_step(page, session, resume_path):
+        return EasyApplyResult(
+            success=False,
+            failure_type="field_unresolved",
+            final_action="blocked",
+            cleanup_success=False,
+            resolved_fields=["Phone"],
+            unresolved_fields=["Code pays"],
+            validation_errors=[],
+        )
+
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_fill_and_validate_step", fake_fill_and_validate_step)
+
+    result = await handler.apply(page=object(), dry_run=True)
+
+    assert result["failure_type"] == "field_unresolved"
+
+
+@pytest.mark.asyncio
 async def test_apply_blocks_when_validation_errors_exist(monkeypatch):
     handler = EasyApplyHandler()
     session = StubSession(action="next", validation_errors=["Invalid phone number"])

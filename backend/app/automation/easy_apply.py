@@ -355,14 +355,22 @@ class EasyApplyHandler:
 
     async def apply(self, page: Page, resume_path: Optional[str] = None, max_steps: int = 10, dry_run: bool = False) -> dict:
         """Run Easy Apply as a session with modal-scoped field validation."""
-        if not await self.click_easy_apply_button(page):
-            return self._to_payload(
-                EasyApplyResult(success=False),
-                errors=["Could not find Easy Apply button"],
-            )
+        async def finalize_structured_failure(step_result: EasyApplyResult, errors: list[str]) -> dict:
+            step_result.cleanup_success = await self._cleanup_modal(page)
+            return self._to_payload(step_result, errors=errors)
 
-        await self.human.random_delay(2, 4)
-        modal = await self.is_modal_open(page)
+        clicked_easy_apply = await self.click_easy_apply_button(page)
+        if clicked_easy_apply:
+            await self.human.random_delay(2, 4)
+            modal = await self.is_modal_open(page)
+        else:
+            modal = await self.is_modal_open(page)
+            if not modal:
+                return self._to_payload(
+                    EasyApplyResult(success=False),
+                    errors=["Could not find Easy Apply button"],
+                )
+
         if not modal:
             return self._to_payload(
                 EasyApplyResult(success=False, failure_type="modal_not_found"),
@@ -384,20 +392,20 @@ class EasyApplyHandler:
             step_result = await self._fill_and_validate_step(page, session, resume_path)
             step_result.steps_completed = step + 1
 
-            if session.step_state.unresolved_fields:
-                return self._to_payload(
+            if step_result.failure_type == "field_unresolved":
+                return await finalize_structured_failure(
                     step_result,
-                    errors=[f"Unresolved required fields: {', '.join(session.step_state.unresolved_fields)}"],
+                    errors=[f"Unresolved required fields: {', '.join(step_result.unresolved_fields)}"],
                 )
 
-            if session.step_state.validation_errors:
-                return self._to_payload(
+            if step_result.failure_type == "field_validation_failed":
+                return await finalize_structured_failure(
                     step_result,
-                    errors=[f"Validation failed: {', '.join(session.step_state.validation_errors)}"],
+                    errors=[f"Validation failed: {', '.join(step_result.validation_errors)}"],
                 )
 
             if step_result.failure_type == "advance_button_not_found":
-                return self._to_payload(
+                return await finalize_structured_failure(
                     step_result,
                     errors=["Could not find Next/Review/Submit button in modal footer"],
                 )
@@ -406,7 +414,7 @@ class EasyApplyHandler:
                 errors = ["Unexpected step failure before detecting advance button"]
                 if step_result.validation_errors:
                     errors.append("; ".join(step_result.validation_errors))
-                return self._to_payload(step_result, errors=errors)
+                return await finalize_structured_failure(step_result, errors=errors)
 
             if step_result.final_action == "submit" and dry_run:
                 cleanup_success = await self._cleanup_modal(page)
@@ -438,7 +446,7 @@ class EasyApplyHandler:
                     unresolved_fields=step_result.unresolved_fields,
                     validation_errors=step_result.validation_errors,
                 )
-                return self._to_payload(
+                return await finalize_structured_failure(
                     failed_click,
                     errors=["Detected action but failed to click modal footer button"],
                 )
@@ -455,7 +463,7 @@ class EasyApplyHandler:
                         unresolved_fields=step_result.unresolved_fields,
                         validation_errors=step_result.validation_errors,
                     )
-                    return self._to_payload(
+                    return await finalize_structured_failure(
                         submit_unconfirmed,
                         errors=["Submit click did not confirm completion or modal close"],
                     )
@@ -481,7 +489,10 @@ class EasyApplyHandler:
             unresolved_fields=session.step_state.unresolved_fields,
             validation_errors=session.step_state.validation_errors,
         )
-        return self._to_payload(exhausted, errors=[f"Exceeded max steps ({max_steps}) before submit"])
+        return await finalize_structured_failure(
+            exhausted,
+            errors=[f"Exceeded max steps ({max_steps}) before submit"],
+        )
 
 
 easy_apply_handler = EasyApplyHandler()
