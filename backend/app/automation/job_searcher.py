@@ -117,12 +117,46 @@ class JobSearcher:
 
         return list(dict.fromkeys(job_ids))  # deduplicate preserving order
 
+    def _build_next_page_url(self, current_url: str, start: int) -> str:
+        """Return URL with deterministic next-page `start` query parameter."""
+        parsed = urllib.parse.urlsplit(current_url)
+        query_params = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+
+        next_query_params = []
+        start_updated = False
+        for key, value in query_params:
+            if key == "start":
+                if not start_updated:
+                    next_query_params.append(("start", str(start)))
+                    start_updated = True
+                continue
+            next_query_params.append((key, value))
+
+        if not start_updated:
+            next_query_params.append(("start", str(start)))
+
+        next_query = urllib.parse.urlencode(next_query_params, doseq=True)
+        return urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path, next_query, parsed.fragment)
+        )
+
     async def next_page(self, page: Page) -> list[str]:
         """Navigate to next page of results."""
         self.current_page_num += 1
         start = self.current_page_num * 25
 
-        # Try clicking pagination: page number button, then "Next" button
+        # Prefer URL-based pagination to avoid overlay click interception.
+        try:
+            new_url = self._build_next_page_url(page.url, start)
+            await page.goto(new_url, wait_until="domcontentloaded", timeout=30000)
+            await self.human.random_delay(3, 6)
+            ids = await self._get_job_card_ids(page)
+            if ids:
+                return ids
+        except Exception as e:
+            logger.warning("URL pagination failed: %s", e)
+
+        # Fallback: click pagination controls.
         next_btn = None
         page_btn = await page.query_selector(f'[aria-label="Page {self.current_page_num + 1}"]')
         if page_btn:
@@ -140,15 +174,8 @@ class JobSearcher:
             except Exception as e:
                 logger.warning("Pagination button click failed: %s", e)
 
-        # Fallback: modify URL
-        current_url = page.url
-        if "start=" in current_url:
-            import re
-            new_url = re.sub(r'start=\d+', f'start={start}', current_url)
-        else:
-            separator = "&" if "?" in current_url else "?"
-            new_url = f"{current_url}{separator}start={start}"
-
+        # Last retry: URL-based navigation.
+        new_url = self._build_next_page_url(page.url, start)
         await page.goto(new_url, wait_until="domcontentloaded", timeout=30000)
         await self.human.random_delay(3, 6)
         return await self._get_job_card_ids(page)
