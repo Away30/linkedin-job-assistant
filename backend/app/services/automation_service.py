@@ -103,15 +103,31 @@ class AutomationService:
     def _build_application_record(self, job_id: int, resume_id: Optional[int], result: dict[str, Any]) -> Application:
         """Build a persisted application record from an apply result payload."""
         structured_outcome = self._extract_structured_apply_outcome(result)
+        is_dry_run_intercept = self._is_dry_run_submit_intercept(result)
+        status = "dry_run" if is_dry_run_intercept else ("applied" if result.get("success") else "failed")
         return Application(
             job_id=job_id,
             resume_id=resume_id,
-            status="applied" if result.get("success") else "failed",
+            status=status,
             apply_method="easy_apply",
             form_answers=structured_outcome,
             error_message=self._build_error_message(result, structured_outcome),
-            applied_at=datetime.utcnow() if result.get("success") else None,
+            applied_at=datetime.utcnow() if result.get("success") and not is_dry_run_intercept else None,
         )
+
+    @staticmethod
+    def _is_dry_run_submit_intercept(result: dict[str, Any]) -> bool:
+        """Return true when dry-run reached the final submit and intentionally skipped it."""
+        return result.get("failure_type") == "submit_intercepted_dry_run"
+
+    @staticmethod
+    def _should_skip_existing_application(existing_app: Application, dry_run: bool) -> bool:
+        """Skip successful applies, and skip prior dry-run hits only while dry-running."""
+        if existing_app.status == "applied":
+            return True
+        if existing_app.status == "dry_run":
+            return dry_run
+        return False
 
     def _build_apply_operation_details(
         self,
@@ -122,8 +138,9 @@ class AutomationService:
     ) -> str:
         """Build a single structured apply diagnostic string for logs and persisted operation trails."""
         outcome = structured_outcome or self._extract_structured_apply_outcome(result)
+        prefix = "Dry-run reached submit" if self._is_dry_run_submit_intercept(result) else "Apply outcome"
         return (
-            f"Apply outcome: {job_title} at {company or 'Unknown company'} - "
+            f"{prefix}: {job_title} at {company or 'Unknown company'} - "
             f"success={bool(result.get('success'))} "
             f"final_action={outcome['final_action']} "
             f"failure_type={outcome['failure_type']} "
@@ -132,6 +149,34 @@ class AutomationService:
             f"unresolved_fields={outcome['unresolved_fields']} "
             f"validation_errors={outcome['validation_errors']}"
         )
+
+    def _build_apply_success_log_message(self, job_title: str, result: dict[str, Any]) -> str:
+        """Use dry-run language when submit was reached but intentionally not sent."""
+        if self._is_dry_run_submit_intercept(result):
+            return f"Dry-run reached submit for {job_title}"
+        return f"Successfully applied to {job_title}"
+
+    @staticmethod
+    def _build_session_summary(completed_count: int, total_jobs: int, dry_run: bool) -> str:
+        """Summarize completed attempts without calling dry-runs real applications."""
+        if dry_run:
+            return f"Completed. Dry-run reached submit for {completed_count} of {total_jobs} jobs."
+        return f"Completed. Applied to {completed_count} of {total_jobs} jobs."
+
+    def _should_network_after_apply(
+        self,
+        request: AutomationStartRequest,
+        result: dict[str, Any],
+        company: Optional[str],
+    ) -> bool:
+        """Never send networking actions from dry-run; connect requests are real side effects."""
+        if request.dry_run:
+            return False
+        if not request.enable_networking or not company:
+            return False
+        if result.get("success"):
+            return True
+        return result.get("final_action") == "submit" and self._is_dry_run_submit_intercept(result)
 
     async def _run_session(self, request: AutomationStartRequest):
         """Main automation loop with its own DB session."""
@@ -315,9 +360,13 @@ class AutomationService:
                     Application.job_id == db_job.id
                 ).first()
                 if existing_app:
-                    self._status.jobs_skipped += 1
-                    logger.info("SKIP #%d '%s': already applied", idx + 1, job_data.title)
-                    continue
+                    if self._should_skip_existing_application(existing_app, dry_run=request.dry_run):
+                        self._status.jobs_skipped += 1
+                        logger.info("SKIP #%d '%s': already attempted (%s)", idx + 1, job_data.title, existing_app.status)
+                        continue
+                    logger.info("Retrying #%d '%s': previous application status=%s", idx + 1, job_data.title, existing_app.status)
+                    db.delete(existing_app)
+                    db.commit()
 
                 # Check blacklist
                 if job_data.company:
@@ -391,13 +440,18 @@ class AutomationService:
                 if result["success"]:
                     applied_count += 1
                     last_apply_time = time.time()
-                    self._status.jobs_applied += 1
+                    if self._is_dry_run_submit_intercept(result):
+                        self._status.jobs_dry_run += 1
+                    else:
+                        self._status.jobs_applied += 1
                     self._log_operation(db, "apply", apply_operation_details, "success")
-                    logger.info("Successfully applied to %s", job_data.title)
+                    logger.info(self._build_apply_success_log_message(job_data.title, result))
 
-                    # Post-apply networking hook
-                    if request.enable_networking and job_data.company:
+                    # Post-apply networking has real side effects, so dry-run never reaches it.
+                    if self._should_network_after_apply(request, result, job_data.company):
                         await self._network_after_apply(page, db, job_data, db_job.id)
+                elif self._should_network_after_apply(request, result, job_data.company):
+                    await self._network_after_apply(page, db, job_data, db_job.id)
                 else:
                     self._status.jobs_failed += 1
                     self._log_operation(db, "apply", apply_operation_details, "failed")
@@ -409,7 +463,7 @@ class AutomationService:
                 await human.random_delay()
                 await human.maybe_long_break(probability=0.1)
 
-            summary = f"Completed. Applied to {applied_count} of {len(all_job_ids)} jobs."
+            summary = self._build_session_summary(applied_count, len(all_job_ids), request.dry_run)
             self._status.status_message = summary
             self._status.current_job = None
             self._log_operation(db, "session", summary, "success")

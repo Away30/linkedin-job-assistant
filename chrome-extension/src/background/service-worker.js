@@ -90,7 +90,7 @@ async function handleMessage(request, sender, sendResponse) {
         previousState.is_running = true;
         previousState.captchaDetected = false;
         previousState.dailyLimitReached = false;
-        sendNotification("Smart Apply", "Automation started");
+        sendNotification("LinkedIn 智能投递", "自动投递已开始");
 
         sendResponse({ success: true, data: startRes });
         // Start polling status via chrome.alarms
@@ -111,8 +111,8 @@ async function handleMessage(request, sender, sendResponse) {
         await chrome.storage.local.set({ automationState });
 
         // Notification: automation stopped with summary
-        const summary = `Applied: ${automationState.jobs_applied}, Failed: ${automationState.jobs_failed}, Found: ${automationState.jobs_found}`;
-        sendNotification("Smart Apply - Stopped", summary);
+        const summary = `已投递: ${automationState.jobs_applied}, 失败: ${automationState.jobs_failed}, 发现: ${automationState.jobs_found}`;
+        sendNotification("LinkedIn 智能投递 - 已停止", summary);
         previousState.is_running = false;
 
         sendResponse({ success: true, data: stopRes });
@@ -144,6 +144,28 @@ async function handleMessage(request, sender, sendResponse) {
         }
         const apiRes = await apiResp.json();
         sendResponse({ success: true, data: apiRes });
+        break;
+      }
+
+      case "getConnections": {
+        const connResp = await apiFetch(`${BACKEND_URL}/connections${payload?.query || ""}`);
+        if (!connResp.ok) {
+          sendResponse({ success: false, error: `HTTP ${connResp.status}` });
+          break;
+        }
+        const connData = await connResp.json();
+        sendResponse({ success: true, data: connData });
+        break;
+      }
+
+      case "getConnectionStats": {
+        const statsResp = await apiFetch(`${BACKEND_URL}/connections/stats`);
+        if (!statsResp.ok) {
+          sendResponse({ success: false, error: `HTTP ${statsResp.status}` });
+          break;
+        }
+        const statsData = await statsResp.json();
+        sendResponse({ success: true, data: statsData });
         break;
       }
 
@@ -197,6 +219,8 @@ async function pollAutomationStatus() {
       jobs_applied: status.jobs_applied || 0,
       jobs_failed: status.jobs_failed || 0,
       jobs_found: status.jobs_found || 0,
+      jobs_dry_run: status.jobs_dry_run || 0,
+      connections_sent: status.connections_sent || 0,
       status_message: status.status_message || "",
       daily_applies_remaining: status.daily_applies_remaining,
       current_job: status.current_job || null,
@@ -206,30 +230,41 @@ async function pollAutomationStatus() {
 
     // Check for state transitions and send notifications
 
+    // Login required detection
+    const isLoginRequired = status.status_message && status.status_message.includes("手动登录");
+    if (isLoginRequired && !previousState.loginNotified) {
+      sendNotification("LinkedIn 智能投递 - 需要登录", "请在打开的浏览器窗口中登录 LinkedIn，你有 5 分钟时间。");
+      previousState.loginNotified = true;
+    }
+
     // CAPTCHA detection
-    const isCaptcha = status.status_message && status.status_message.toLowerCase().includes("captcha");
+    const isCaptcha = status.status_message && status.status_message.toLowerCase().includes("验证码");
     if (isCaptcha && !previousState.captchaDetected) {
-      sendNotification("Smart Apply - CAPTCHA", "CAPTCHA detected, please solve it in the browser window");
+      sendNotification("LinkedIn 智能投递 - 验证码", "检测到验证码，请在浏览器窗口中手动完成");
       previousState.captchaDetected = true;
     }
     if (!isCaptcha && previousState.captchaDetected) {
       previousState.captchaDetected = false;
     }
+    if (!isLoginRequired) {
+      previousState.loginNotified = false;
+    }
 
     // Daily limit reached
     const isDailyLimit = status.status_message && (
+      status.status_message.includes("每日投递上限") ||
       status.status_message.toLowerCase().includes("daily limit") ||
       status.status_message.toLowerCase().includes("rate limit")
     );
     if (isDailyLimit && !previousState.dailyLimitReached) {
-      sendNotification("Smart Apply - Daily Limit", "Daily limit reached, automation stopped");
+      sendNotification("LinkedIn 智能投递 - 每日上限", "已达到每日投递上限，自动投递已停止");
       previousState.dailyLimitReached = true;
     }
 
     // Automation completed (was running, now stopped)
     if (previousState.is_running && !status.is_running) {
-      const summary = `Completed. Applied: ${status.jobs_applied}, Failed: ${status.jobs_failed}`;
-      sendNotification("Smart Apply - Completed", summary);
+      const summary = `投递完成。已投递: ${status.jobs_applied}, 失败: ${status.jobs_failed}`;
+      sendNotification("LinkedIn 智能投递 - 已完成", summary);
       previousState.is_running = false;
     }
 

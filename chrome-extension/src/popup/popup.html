@@ -3,40 +3,51 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LinkedIn Smart Apply</title>
+    <title>LinkedIn 智能投递</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <div class="container">
       <!-- Header -->
       <div class="header">
-        <h1>Smart Apply</h1>
+        <h1>智能投递</h1>
         <div class="health-indicator" id="healthIndicator">
           <span class="dot red"></span>
-          <span class="text">Backend connecting...</span>
+          <span class="text">后端连接中...</span>
         </div>
+      </div>
+
+      <!-- First-Run / API Key Banner -->
+      <div id="setupBanner" style="display:none;padding:10px 12px;margin-bottom:10px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;font-size:12px;line-height:1.5;">
+        <div style="font-weight:700;margin-bottom:4px;">欢迎使用 LinkedIn 智能投递！</div>
+        <div id="bannerMessage">请先在设置页配置 API Key。启动后端时终端会显示 Key。</div>
+        <button id="bannerSettingsBtn" style="margin-top:6px;padding:4px 12px;font-size:11px;background:#0a66c2;color:white;border:none;border-radius:4px;cursor:pointer;">前往设置</button>
       </div>
 
       <!-- Status Card -->
       <div class="status-card">
         <div class="status-item">
-          <span class="label">Status:</span>
-          <span class="value" id="status">Idle</span>
+          <span class="label">状态:</span>
+          <span class="value" id="status">空闲</span>
         </div>
         <div class="status-item">
-          <span class="label">Applied:</span>
+          <span class="label">已投递:</span>
           <span class="value" id="applied">0</span>
         </div>
+        <div class="status-item" id="dryRunRow" style="display:none;">
+          <span class="label">模拟提交:</span>
+          <span class="value" id="dryRunCount">0</span>
+        </div>
         <div class="status-item">
-          <span class="label">Failed:</span>
+          <span class="label">失败:</span>
           <span class="value" id="failed">0</span>
         </div>
         <div class="status-item" id="progressRow" style="display:none;">
-          <span class="label">Progress:</span>
-          <span class="value" id="progress">0 / 0 today</span>
+          <span class="label">进度:</span>
+          <span class="value" id="progress">0 / 0 今日</span>
         </div>
         <div class="status-item" id="currentJobRow" style="display:none;">
-          <span class="label">Current Job:</span>
+          <span class="label">当前职位:</span>
           <span class="value" id="currentJob" style="font-size:11px;">-</span>
         </div>
       </div>
@@ -46,30 +57,33 @@
 
       <!-- Filter Selection -->
       <div class="control-section">
-        <label for="filterSelect">Search Filter:</label>
+        <label for="filterSelect">搜索条件:</label>
         <select id="filterSelect">
-          <option value="">-- Select a filter --</option>
+          <option value="">-- 请选择筛选条件 --</option>
         </select>
       </div>
 
       <!-- Controls -->
       <div class="control-buttons">
         <label style="font-size: 12px; display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">
-          <input type="checkbox" id="dryRunToggle"> Dry Run (不提交申请)
+          <input type="checkbox" id="dryRunToggle"> 模拟运行（不提交申请）
         </label>
-        <button id="startBtn" class="btn btn-primary">Start Auto-Apply</button>
-        <button id="stopBtn" class="btn btn-secondary" disabled>Stop</button>
+        <label style="font-size: 12px; display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">
+          <input type="checkbox" id="networkingToggle"> 投递后自动 connect recruiter
+        </label>
+        <button id="startBtn" class="btn btn-primary">开始自动投递</button>
+        <button id="stopBtn" class="btn btn-secondary" disabled>停止</button>
       </div>
 
       <!-- Quick Links -->
       <div class="quick-links">
-        <button id="dashboardBtn" class="link-btn">📊 Dashboard</button>
-        <button id="settingsBtn" class="link-btn">⚙️ Settings</button>
+        <button id="dashboardBtn" class="link-btn">📊 控制台</button>
+        <button id="settingsBtn" class="link-btn">⚙️ 设置</button>
       </div>
 
       <!-- Footer -->
       <div class="footer">
-        <small>v0.1.0 • Backend: <span id="backendStatus">offline</span></small>
+        <small>v0.1.0 • 后端: <span id="backendStatus">离线</span></small>
       </div>
     </div>
 

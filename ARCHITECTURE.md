@@ -334,5 +334,62 @@ Chrome Web Store (Published extension)
 
 ---
 
+## Networking Module (post-apply outreach)
+
+After a successful apply, the orchestrator can optionally find and connect
+with people at the same company. The flow lives in
+`backend/app/automation/networking/`:
+
+```
+NetworkingService.network_after_apply
+  ├── PeopleSearcher.search_people      # LinkedIn People search
+  │     - Builds /search/results/people/?keywords=…
+  │     - Extracts profile URL, name, headline from cards
+  │     - Classifies headline → recruiter / hiring_manager / engineer / other
+  │       (multi-word phrases checked first; "head of …" defaults to
+  │        hiring_manager unless paired with talent/recruit)
+  │
+  ├── MessageTemplateEngine.generate    # Personalized 300-char invite note
+  │     - Defaults baked in for recruiter / hiring_manager / engineer / default
+  │     - Reads overrides from data/config/connection_messages.yaml
+  │     - Hot reloads when the YAML mtime changes (no restart needed)
+  │
+  └── ConnectionSender.send_connection  # Click Connect → "Add a note" → Send
+        - Per-step human-like delays + retries
+        - Persists Connection rows: pending → sent / failed → accepted
+```
+
+Rate limiting is independent from applies:
+`RateLimiter.can_connect` / `get_daily_connect_remaining` use
+`MAX_CONNECTS_PER_DAY` and only count rows with `status="sent"` from today.
+
+API surface:
+
+- `GET /connections`, `GET /connections/stats`
+- `PATCH /connections/{id}` (body `{"status": "accepted"}`)
+- `GET/POST /connections/messages` (template overrides)
+- `POST /connections/trigger?job_id=…` (manual one-off)
+
+The auto path is gated by `enable_networking=true` on the
+`POST /automation/start` request and only runs after a real apply (or a
+dry-run that successfully reached submit). Dry-run sessions never send
+real invites.
+
+## Persistence-related decisions
+
+- **SQLite WAL** — `app/db/session.py` enables `journal_mode=WAL`,
+  `synchronous=NORMAL`, and `busy_timeout=30000` on every connection so
+  the SSE poller and the automation worker can interleave reads and
+  writes without `database is locked`.
+- **Runtime settings overrides** — `Settings.persist_runtime_overrides`
+  writes a JSON file at `data/config/runtime_settings.json` for the
+  allowlisted keys (rate limits, delays, networking flags). Anything not
+  in the allowlist is rejected with HTTP 400 — load-bearing config like
+  `DB_PATH` or `CORS_ORIGINS` cannot be mutated from the UI.
+- **Schema migrations** — `backend/scripts/migrate_indexes.py` adds any
+  ORM-declared `index=True` columns to an existing DB idempotently.
+
+---
+
 **Last Updated:** March 2026
 **Version:** 0.1.0 (MVP)

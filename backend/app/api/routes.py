@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 from pathlib import Path as PathLib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import asyncio
 import json
+import logging
 import uuid
+import yaml
 
 from app.db.session import get_db
 from app.models import Job, Application, Resume, SearchFilter, OperationLog, Blacklist
@@ -23,6 +25,7 @@ from app.schemas.schemas import (
 from app.services.automation_service import automation_service
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ---- Health ----
@@ -52,14 +55,23 @@ async def get_automation_status():
     return automation_service.get_status()
 
 @router.get("/automation/status/stream")
-async def stream_automation_status():
+async def stream_automation_status(request: Request):
     async def event_generator():
-        while True:
-            status = automation_service.get_status()
-            yield f"data: {json.dumps(status.model_dump(), default=str)}\n\n"
-            if not status.is_running:
-                break
-            await asyncio.sleep(2)
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                status = automation_service.get_status()
+                yield f"data: {json.dumps(status.model_dump(), default=str)}\n\n"
+                if not status.is_running:
+                    return
+                await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            # Client closed the stream — exit cleanly so the worker doesn't leak.
+            raise
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("status SSE generator failed")
+            return
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 # ---- Jobs ----
@@ -242,16 +254,22 @@ def get_settings():
         action_delay_min=settings.ACTION_DELAY_MIN,
         action_delay_max=settings.ACTION_DELAY_MAX,
         max_session_minutes=settings.MAX_SESSION_MINUTES,
+        networking_enabled=settings.NETWORKING_ENABLED,
+        networking_max_per_session=settings.NETWORKING_MAX_PER_SESSION,
+        networking_person_types=settings.NETWORKING_PERSON_TYPES,
     )
 
 
 @router.post("/settings")
 def update_settings(update: SettingsUpdate):
-    for key, value in update.model_dump(exclude_unset=True).items():
-        attr = key.upper()
-        if hasattr(settings, attr):
-            setattr(settings, attr, value)
-    return {"message": "Settings updated"}
+    payload = update.model_dump(exclude_unset=True)
+    if not payload:
+        return {"message": "No changes", "updated": {}}
+    try:
+        applied = settings.persist_runtime_overrides(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"message": "Settings updated", "updated": applied}
 
 
 # ---- Blacklist ----
@@ -301,7 +319,7 @@ async def retry_application(app_id: int, db: Session = Depends(get_db)):
 @router.get("/stats/summary")
 async def stats_summary(db: Session = Depends(get_db)):
     """Get application statistics for the last 7 days."""
-    seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    seven_days_ago = datetime.utcnow() - timedelta(days=7)
 
     total = db.query(Application).filter(Application.applied_at >= seven_days_ago).count()
     successful = db.query(Application).filter(
@@ -328,3 +346,28 @@ async def stats_summary(db: Session = Depends(get_db)):
         "success_rate": round(successful / total * 100, 1) if total > 0 else 0,
         "top_companies": [{"company": c, "count": n} for c, n in top_companies if c],
     }
+
+
+# --- Form Answers ---
+
+@router.get("/form-answers")
+def get_form_answers():
+    """Read form_answers.yaml and return as JSON."""
+    yaml_path = settings.FORM_ANSWERS_PATH
+    if not yaml_path.exists():
+        return {}
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return data or {}
+
+
+@router.post("/form-answers")
+def update_form_answers(answers: dict):
+    """Write form answers dict to form_answers.yaml."""
+    yaml_path = settings.FORM_ANSWERS_PATH
+    yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    # Strip None values and ensure all values are strings
+    cleaned = {k: str(v) if v is not None else "" for k, v in answers.items()}
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        yaml.dump(cleaned, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return {"message": "表单答案已保存", "count": len(cleaned)}

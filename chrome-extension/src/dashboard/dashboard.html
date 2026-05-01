@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Application Tracker - LinkedIn Auto-Apply</title>
+  <title>投递记录 - LinkedIn 自动投递</title>
   <style>
     * {
       margin: 0;
@@ -147,6 +147,18 @@
       background: #fff3cd;
       color: #856404;
     }
+    .badge.sent {
+      background: #d4edda;
+      color: #155724;
+    }
+    .badge.accepted {
+      background: #cce5ff;
+      color: #004085;
+    }
+    .badge.failed {
+      background: #f8d7da;
+      color: #721c24;
+    }
 
     .action-btn {
       padding: 4px 8px;
@@ -184,63 +196,152 @@
       background: #f0f7ff;
       padding: 16px 20px;
     }
+
+    /* Tab styles */
+    .tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #ddd;
+    }
+    .tab {
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #666;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      transition: all 0.2s;
+      background: none;
+      border-top: none;
+      border-left: none;
+      border-right: none;
+      border-radius: 0;
+    }
+    .tab:hover {
+      color: #0a66c2;
+    }
+    .tab.active {
+      color: #0a66c2;
+      border-bottom-color: #0a66c2;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1>📊 Application Tracker</h1>
+      <h1>📊 投递记录</h1>
       <div class="header-actions">
-        <button id="exportBtn">📥 Export CSV</button>
-        <button id="refreshBtn">🔄 Refresh</button>
+        <button id="exportBtn">📥 导出 CSV</button>
+        <button id="refreshBtn">🔄 刷新</button>
       </div>
     </div>
 
-    <div class="stats" id="stats"></div>
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button class="tab active" data-tab="applications">投递记录</button>
+      <button class="tab" data-tab="connections">社交连接</button>
+    </div>
 
-    <div class="filters">
-      <div class="filter-group" style="flex: 1;">
-        <label>Position</label>
-        <input type="text" id="positionFilter" placeholder="Filter by job title..." />
+    <!-- Applications Tab -->
+    <div class="tab-content active" id="tab-applications">
+      <div class="stats" id="stats"></div>
+
+      <div class="filters">
+        <div class="filter-group" style="flex: 1;">
+          <label>职位</label>
+          <input type="text" id="positionFilter" placeholder="按职位名称筛选..." />
+        </div>
+        <div class="filter-group" style="flex: 1;">
+          <label>公司</label>
+          <input type="text" id="companyFilter" placeholder="按公司名称筛选..." />
+        </div>
+        <div class="filter-group" style="flex: 1;">
+          <label>状态</label>
+          <select id="statusFilter">
+            <option value="">全部</option>
+            <option value="applied">已投递</option>
+            <option value="failed">失败</option>
+            <option value="pending">待处理</option>
+            <option value="pending_retry">待重试</option>
+            <option value="dry_run">模拟</option>
+          </select>
+        </div>
       </div>
-      <div class="filter-group" style="flex: 1;">
-        <label>Company</label>
-        <input type="text" id="companyFilter" placeholder="Filter by company..." />
-      </div>
-      <div class="filter-group" style="flex: 1;">
-        <label>Status</label>
-        <select id="statusFilter">
-          <option value="">All</option>
-          <option value="applied">Applied</option>
-          <option value="failed">Failed</option>
-          <option value="pending">Pending</option>
-        </select>
+
+      <div class="table-container">
+        <table id="applicationsTable">
+          <thead>
+            <tr>
+              <th>职位名称</th>
+              <th>公司</th>
+              <th>地点</th>
+              <th>匹配度</th>
+              <th>投递日期</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <tr>
+              <td colspan="7" class="no-data">加载投递记录中...</td>
+            </tr>
+          </tbody>
+        </table>
+        <div id="paginationContainer" class="pagination"></div>
       </div>
     </div>
 
-    <div class="table-container">
-      <table id="applicationsTable">
-        <thead>
-          <tr>
-            <th>Job Title</th>
-            <th>Company</th>
-            <th>Location</th>
-            <th>Match</th>
-            <th>Applied Date</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="tableBody">
-          <tr>
-            <td colspan="7" class="no-data">Loading applications...</td>
-          </tr>
-        </tbody>
-      </table>
-      <div id="paginationContainer" class="pagination"></div>
+    <!-- Connections Tab -->
+    <div class="tab-content" id="tab-connections">
+      <div class="stats" id="connectionStats"></div>
+
+      <div class="filters">
+        <div class="filter-group" style="flex: 1;">
+          <label>公司</label>
+          <input type="text" id="connCompanyFilter" placeholder="按公司名称筛选..." />
+        </div>
+        <div class="filter-group" style="flex: 1;">
+          <label>状态</label>
+          <select id="connStatusFilter">
+            <option value="">全部</option>
+            <option value="sent">已发送</option>
+            <option value="accepted">已接受</option>
+            <option value="failed">失败</option>
+            <option value="pending">待处理</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table id="connectionsTable">
+          <thead>
+            <tr>
+              <th>姓名</th>
+              <th>职称</th>
+              <th>公司</th>
+              <th>类型</th>
+              <th>状态</th>
+              <th>发送时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="connTableBody">
+            <tr>
+              <td colspan="7" class="no-data">加载连接记录中...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <script src="dashboard.js"></script>
+  <script type="module" src="dashboard.js"></script>
 </body>
 </html>

@@ -19,16 +19,24 @@ A local-only Chrome extension plus FastAPI backend for tracking LinkedIn jobs an
 
 ## Before You Start
 
-This project stores real runtime state locally and does not commit it:
+This project stores real runtime state locally and does not commit it. The
+following paths are gitignored — **do not track them, they leak PII or
+session state**:
 
 - `backend/.env`
 - `backend/data/db/`
 - `backend/data/browser_profile/`
+- `backend/data/chrome_profile/` (Chrome user-data dir created in CDP mode; contains LinkedIn cookies)
 - `backend/data/logs/`
 - `backend/data/resumes/`
 - `backend/data/config/api_key.txt`
+- `backend/data/config/form_answers.yaml` (your real PII — name/phone/email/work auth)
+- `backend/data/config/connection_messages.yaml` (custom recruiter outreach copy)
+- `backend/data/config/runtime_settings.json` (per-machine setting overrides)
 
 That is intentional. A fresh clone gives you code, not your local session state.
+
+> **If you are setting up for the first time:** copy `backend/data/config/form_answers.yaml.example` to `backend/data/config/form_answers.yaml` and fill in your real values locally. The example file is the only one that lives in version control.
 
 ## Fresh Clone Setup
 
@@ -120,8 +128,9 @@ In the extension:
 
 In local files:
 
-- Replace the placeholder answers in `backend/data/config/form_answers.yaml`
-- Do not leave the default fake contact info in place
+- Copy `backend/data/config/form_answers.yaml.example` → `backend/data/config/form_answers.yaml`
+- Replace the placeholder answers with your real contact info / work-auth / education
+- (Optional) seed `backend/data/config/connection_messages.yaml` to override the post-apply recruiter outreach copy
 
 ## Daily Run Workflow
 
@@ -156,9 +165,40 @@ Base URL: `http://127.0.0.1:8899/api/v1`
 - `POST /applications/{app_id}/retry`
 - `GET /stats/summary`
 - `GET /settings`
-- `POST /settings`
+- `POST /settings` (only `max_applies_per_day`, `max_connects_per_day`, `action_delay_min/max`, `networking_*` are user-editable; persisted to `data/config/runtime_settings.json`)
 - `GET /blacklist`
 - `POST /blacklist`
+
+### Networking endpoints (post-apply recruiter / hiring-manager outreach)
+
+- `GET /connections` - list sent / pending / accepted invites
+- `GET /connections/stats` - 7-day aggregate
+- `PATCH /connections/{id}` - mark accepted, etc. (body: `{"status": "accepted"}`)
+- `GET /connections/messages` / `POST /connections/messages` - per-persona message templates (recruiter / hiring_manager / engineer / default)
+- `POST /connections/trigger?job_id=…` - manually fire networking for a saved job's company
+
+`enable_networking: true` on `POST /automation/start` runs the same flow automatically after each successful apply.
+
+## Database Migrations
+
+The schema is created by SQLAlchemy on first run via `init_db()`. When the
+ORM gains a new index on an already-populated DB, run the one-shot migrator:
+
+```bash
+cd /Users/away/Desktop/Linkedin投递/linkedin-job-assistant/backend
+source venv/bin/activate
+python -m scripts.migrate_indexes
+```
+
+Idempotent — safe to re-run.
+
+## Security Posture
+
+- **Loopback only** — backend binds to `127.0.0.1` and never exposes a remote port.
+- **API key auth** — every `/api/*` route requires `X-API-Key`; the key is generated on first launch into `backend/data/config/api_key.txt` and compared with `secrets.compare_digest` (constant-time).
+- **CORS** — when `LJA_EXTENSION_ID` is set the allowlist pins one origin and `allow_credentials=True`. Without it the dev fallback uses an origin regex with `allow_credentials=False`, avoiding the spec-banned wildcard-with-credentials combination.
+- **PII / session data is gitignored** — the listed runtime files never enter version control. Re-check `git status` after every pull before committing.
+- **Rate limits + warmup** — the human simulator and `RateLimiter` enforce daily caps; tune via `/settings` (persisted to `runtime_settings.json`).
 
 ## Troubleshooting
 

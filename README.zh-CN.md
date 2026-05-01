@@ -21,11 +21,12 @@
 
 - LinkedIn 职位筛选与管理
 - 多份简历上传与本地管理
-- Easy Apply 流程自动化辅助
+- Easy Apply 流程自动化辅助（含 dry-run "模拟提交"模式）
 - 投递记录追踪与状态查看
-- 本地 SQLite 数据存储
+- 本地 SQLite 数据存储（启用 WAL，并发更稳）
 - 基于规则的速率限制与安全控制
 - 保留浏览器登录态，减少重复登录成本
+- 投递后可选自动连接 recruiter / hiring manager（个人化文案模板，可热更新）
 
 ## 项目特点
 
@@ -71,7 +72,39 @@
 - 需要在 `backend/.env` 中配置 `LJA_EXTENSION_ID`
 - 启动后端时建议使用 `--env-file .env`
 - 需要手动加载 Chrome unpacked extension
-- 需要自行创建筛选器、上传简历，并填写 `backend/data/config/form_answers.yaml`
+- 需要自行创建筛选器、上传简历
+- 拷贝 `backend/data/config/form_answers.yaml.example` → `form_answers.yaml`，再填入真实信息（这个文件已被 gitignore，不会提交）
+
+## ⚠️ 隐私 / PII 注意事项
+
+以下文件**含个人敏感数据**，已加入 `.gitignore`，请永远不要 `git add`：
+
+- `backend/data/config/form_answers.yaml` — 真实姓名 / 电话 / 邮箱 / 工作授权 / GPA / 期望薪资
+- `backend/data/config/connection_messages.yaml` — 自定义 recruiter 邀请文案
+- `backend/data/config/api_key.txt` — 后端访问凭证
+- `backend/data/config/runtime_settings.json` — 通过 UI 修改的限速等运行时配置
+- `backend/data/chrome_profile/` — CDP 模式下自动创建的 Chrome 用户目录，**包含 LinkedIn 登录 Cookie**
+- `backend/data/browser_profile/`、`backend/data/db/`、`backend/data/logs/`、`backend/data/resumes/`
+
+提交前务必跑一次 `git status`，确认这些路径都不在暂存区。
+
+## 数据库迁移
+
+ORM 第一次启动会自动 `init_db()` 建表。如果在已有 DB 上添加了索引（例如本次的 connections 表），跑一次幂等迁移：
+
+```bash
+cd backend
+source venv/bin/activate
+python -m scripts.migrate_indexes
+```
+
+## 安全设计
+
+- 后端只绑定 `127.0.0.1`，不对外暴露
+- 所有 `/api/*` 路由强制 `X-API-Key`，使用 `secrets.compare_digest` 常量时间比较
+- CORS 在配了 `LJA_EXTENSION_ID` 时只放行该扩展 ID + localhost；否则使用正则匹配 + `allow_credentials=False`，避免"通配 + credentials"的浏览器禁止组合
+- `/settings POST` 只接受白名单字段（限速、延迟、networking 三类），写入 `runtime_settings.json` 后重启仍然生效
+- 速率限制 + 预热曲线（warmup）+ 模拟人类延迟，降低被风控的概率
 
 ## 安全说明
 
