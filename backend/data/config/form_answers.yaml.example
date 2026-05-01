@@ -1,10 +1,11 @@
 # Pre-configured form answers for LinkedIn Easy Apply
 # Keys are matched against form field labels using fuzzy matching.
-# Edit these values with your personal information before using.
+# Copy this file to form_answers.yaml and fill in your real values.
+# DO NOT commit form_answers.yaml — it is gitignored to protect PII.
 
 # Contact info
 phone_number: "555-0100"
-email: "test@example.com"
+email: "your-email@example.com"
 
 # Common questions
 years_of_experience: "3"
@@ -23,19 +24,19 @@ disability_status: "No"
 
 # Education
 degree: "Bachelor's"
-school: "Test University"
+school: "Your University"
 field_of_study: "Computer Science"
 gpa: "3.5"
 
 # Personal info
-first_name: "Test"
-last_name: "User"
-city: "San Francisco"
-state: "CA"
+first_name: "First"
+last_name: "Last"
+city: "Your City"
+state: "Your State"
 country: "US"
-zip_code: "94105"
-linkedin_url: "https://linkedin.com/in/testuser"
-website: "https://github.com/testuser"
+zip_code: "00000"
+linkedin_url: "https://linkedin.com/in/your-handle"
+website: "https://github.com/your-handle"
 
 # Other
 cover_letter: ""

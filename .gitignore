@@ -13,10 +13,14 @@ backend/.pytest_cache/
 
 # Local runtime data
 backend/data/browser_profile/
+backend/data/chrome_profile/
 backend/data/db/
 backend/data/logs/
 backend/data/resumes/
 backend/data/config/api_key.txt
+backend/data/config/form_answers.yaml
+backend/data/config/connection_messages.yaml
+backend/data/config/runtime_settings.json
 
 # Editor and local tooling
 .claude/
