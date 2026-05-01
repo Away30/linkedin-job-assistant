@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from app.db.session import Base
 
@@ -19,5 +19,5 @@ class SearchFilter(Base):
     preferred_skills = Column(String(2000))  # comma-separated: Docker, K8s
     min_match_score = Column(Integer, default=40)  # 0-100, skip jobs below this
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    updated_at = Column(DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow())

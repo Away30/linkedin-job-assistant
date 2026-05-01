@@ -12,9 +12,11 @@ logger = logging.getLogger(__name__)
 class HumanSimulator:
     """Simulates human-like interactions to avoid bot detection."""
 
-    def __init__(self, action_delay_min: float = 3.0, action_delay_max: float = 12.0):
-        self.action_delay_min = action_delay_min
-        self.action_delay_max = action_delay_max
+    def __init__(self, action_delay_min: float = None, action_delay_max: float = None):
+        # Read defaults from settings if not explicitly provided
+        from app.config import settings
+        self.action_delay_min = action_delay_min if action_delay_min is not None else settings.ACTION_DELAY_MIN
+        self.action_delay_max = action_delay_max if action_delay_max is not None else settings.ACTION_DELAY_MAX
         self._mouse_x: float = 0.0
         self._mouse_y: float = 0.0
 
@@ -32,34 +34,73 @@ class HumanSimulator:
         await asyncio.sleep(random.uniform(0.5, 2.0))
 
     async def type_like_human(self, locator: Locator, text: str):
-        """Type text with random delays between keystrokes."""
+        """Type text with variable, realistic delays between keystrokes."""
         await locator.click()
         await self.short_delay()
-        delay = random.randint(50, 150)
         if len(text) > 6 and random.random() < 0.3:
             split = random.randint(len(text) // 3, 2 * len(text) // 3)
-            await locator.press_sequentially(text[:split], delay=delay)
+            await self._type_with_variation(locator, text[:split])
             await asyncio.sleep(random.uniform(0.3, 0.8))
-            await locator.press_sequentially(text[split:], delay=delay)
+            await self._type_with_variation(locator, text[split:])
         else:
-            await locator.press_sequentially(text, delay=delay)
+            await self._type_with_variation(locator, text)
+
+    async def _type_with_variation(self, locator: Locator, text: str):
+        """Type text character by character with per-character delay variation."""
+        for char in text:
+            # Shorter delay for common characters, longer for special ones
+            if char in "etaoinsrhld ":
+                delay = random.uniform(30, 80)
+            elif char in ".,;:!?":
+                delay = random.uniform(100, 200)
+            else:
+                delay = random.uniform(50, 130)
+            await locator.press_sequentially(char, delay=0)
+            await asyncio.sleep(delay / 1000)
 
     async def human_click(self, locator: Locator):
-        """Click with slight position randomness and pre/post delays."""
+        """Click with mouse movement, position randomness and pre/post delays."""
         await asyncio.sleep(random.uniform(0.3, 1.0))
         try:
             box = await locator.bounding_box()
             if box:
                 x = box["x"] + box["width"] * random.uniform(0.3, 0.7)
                 y = box["y"] + box["height"] * random.uniform(0.3, 0.7)
-                page = locator.page
-                await page.mouse.click(x, y)
+                page = await self._get_page_from_element(locator)
+                if page:
+                    # Move mouse to target naturally before clicking
+                    await self.move_mouse_naturally(page, x, y)
+                    await asyncio.sleep(random.uniform(0.05, 0.15))
+                    await page.mouse.click(x, y)
+                else:
+                    await locator.click()
             else:
                 await locator.click()
         except Exception as e:
             logger.debug("human_click fallback for locator: %s", e)
             await locator.click()
         await asyncio.sleep(random.uniform(0.2, 0.6))
+
+    async def _get_page_from_element(self, element):
+        """Extract the Page object from either a Locator or ElementHandle."""
+        # Locator has .page property
+        if hasattr(element, "page"):
+            try:
+                return element.page
+            except Exception:
+                pass
+        # ElementHandle (from CDP query_selector) uses _page
+        if hasattr(element, "_page"):
+            return element._page
+        # Fallback: owner_frame → page
+        if hasattr(element, "owner_frame"):
+            try:
+                frame = await element.owner_frame()
+                if frame:
+                    return frame.page
+            except Exception:
+                pass
+        return None
 
     async def scroll_naturally(self, page: Page, direction: str = "down", distance: int = 300):
         """Scroll with variable speed to simulate human reading."""

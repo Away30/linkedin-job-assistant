@@ -62,6 +62,9 @@ class JobSearcher:
         if start > 0:
             params["start"] = str(start)
 
+        # Sort by date (newest first) so user applies to freshest jobs
+        params["sortBy"] = "DD"
+
         query_string = urllib.parse.urlencode(params)
         return f"{self.BASE_SEARCH_URL}?{query_string}"
 

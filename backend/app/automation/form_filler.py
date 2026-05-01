@@ -175,23 +175,39 @@ class FormFiller:
             return False
 
     async def fill_radio_field(self, page: Page, fieldset: Locator, label: str) -> bool:
-        """Fill a radio button group."""
+        """Fill a radio button group — supports native <input type="radio"> and div[role="radio"]."""
         answer = self._find_answer(label)
         if not answer:
             return False
 
         try:
             answer_lower = answer.lower()
-            radios = await fieldset.query_selector_all('input[type="radio"]')
 
+            # Native radio inputs
+            radios = await fieldset.query_selector_all('input[type="radio"]')
             for radio in radios:
-                # Get associated label
                 radio_id = await radio.get_attribute("id")
                 if radio_id:
                     radio_label = await self._get_radio_label(fieldset, radio_id)
                     if radio_label and answer_lower in radio_label.lower():
                         await self.human.human_click(radio)
                         return True
+
+            # div[role="radio"] — LinkedIn often uses these instead of native inputs
+            role_radios = await fieldset.query_selector_all('[role="radio"]')
+            for role_radio in role_radios:
+                try:
+                    aria_label = await role_radio.get_attribute("aria-label")
+                    if aria_label and answer_lower in aria_label.lower():
+                        await self.human.human_click(role_radio)
+                        return True
+
+                    text = (await role_radio.inner_text()).strip().lower()
+                    if text and answer_lower in text:
+                        await self.human.human_click(role_radio)
+                        return True
+                except Exception:
+                    continue
 
             return False
         except Exception as e:
@@ -267,7 +283,7 @@ class FormFiller:
             if await self._is_required_field(field):
                 self._append_once(result["unresolved_fields"], label)
 
-        # Radio groups
+        # Radio groups — native fieldsets
         fieldsets = await container.query_selector_all("fieldset")
         for fieldset in fieldsets:
             if not await self._is_visible_and_editable(fieldset):
@@ -288,6 +304,29 @@ class FormFiller:
 
             if await self._is_required_field(fieldset) or await self._fieldset_has_required_radio(fieldset):
                 self._append_once(result["unresolved_fields"], label)
+
+        # Radio groups — div[role="radiogroup"] (LinkedIn often uses these)
+        radiogroups = await container.query_selector_all('[role="radiogroup"]')
+        for rg in radiogroups:
+            if not await self._is_visible_and_editable(rg):
+                continue
+
+            # Get label from aria-label or preceding label element
+            rg_label = await rg.get_attribute("aria-label")
+            if not rg_label:
+                rg_id = await rg.get_attribute("id")
+                if rg_id:
+                    label_el = await container.query_selector(f'label[for="{rg_id}"]')
+                    if label_el:
+                        rg_label = (await label_el.inner_text()).strip()
+            if not rg_label:
+                continue
+
+            filled = await self.fill_radio_field(container, rg, rg_label)
+            if filled:
+                self._append_once(result["resolved_fields"], rg_label)
+            else:
+                self._append_once(result["unresolved_fields"], rg_label)
 
         # Standalone checkboxes
         checkboxes = await container.query_selector_all('input[type="checkbox"]')
@@ -348,9 +387,43 @@ class FormFiller:
     async def _get_radio_label(self, fieldset: Any, radio_id: str) -> str:
         """Get label text for a radio input from fieldset-local label bindings."""
         try:
+            # 1. Standard <label for="radio_id">
             label_el = await fieldset.query_selector(f'label[for="{radio_id}"]')
             if label_el:
                 return (await label_el.inner_text()).strip()
+        except Exception:
+            pass
+
+        try:
+            radio = await fieldset.query_selector(f'#{radio_id}')
+            if radio:
+                # 2. aria-label on the radio input itself
+                aria = await radio.get_attribute("aria-label")
+                if aria:
+                    return aria.strip()
+
+                # 3. Wrapping <label> — find closest parent label
+                parent_label = await radio.evaluate_handle(
+                    "el => el.closest('label')"
+                )
+                if parent_label:
+                    text = await parent_label.evaluate("el => el.textContent")
+                    if text:
+                        # Extract just the label text (exclude the input's own value)
+                        return text.strip().split("\n")[-1].strip()
+        except Exception:
+            pass
+
+        try:
+            # 4. Adjacent sibling <span> or <div>
+            sibling = await fieldset.query_selector(
+                f'#{radio_id} + span, #{radio_id} ~ span, '
+                f'#{radio_id} + div, #{radio_id} ~ div'
+            )
+            if sibling:
+                text = (await sibling.inner_text()).strip()
+                if text:
+                    return text
         except Exception:
             pass
 

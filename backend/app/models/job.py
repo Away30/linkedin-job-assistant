@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, Boolean, Float, DateTime
 from app.db.session import Base
 
@@ -19,5 +19,5 @@ class Job(Base):
     job_type = Column(String(100))  # full-time, contract, etc.
     match_score = Column(Float, default=0.0)
     posted_date = Column(String(100))
-    scraped_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    scraped_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())

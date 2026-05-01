@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "LinkedIn Smart Apply Assistant",
+  "name": "LinkedIn 智能投递助手",
   "version": "0.1.0",
-  "description": "Auto-apply to LinkedIn jobs with smart filtering, safety features, and real-time tracking",
+  "description": "智能筛选、安全限速、实时追踪，自动投递 LinkedIn 职位",
   "permissions": [
     "storage",
     "alarms",

@@ -5,8 +5,12 @@ import pytest
 
 playwright_module = types.ModuleType("playwright")
 playwright_async_api = types.ModuleType("playwright.async_api")
+playwright_async_api.async_playwright = object
+playwright_async_api.Browser = object
+playwright_async_api.BrowserContext = object
 playwright_async_api.Page = object
 playwright_async_api.Locator = object
+playwright_async_api.Playwright = object
 playwright_module.async_api = playwright_async_api
 sys.modules.setdefault("playwright", playwright_module)
 sys.modules.setdefault("playwright.async_api", playwright_async_api)
@@ -26,11 +30,106 @@ class StubSession:
                 "resolved_fields": ["Email"],
                 "unresolved_fields": unresolved or [],
                 "validation_errors": validation_errors or [],
+                "step_index": 1,
             },
         )()
 
     async def detect_primary_action(self):
         return self.action
+
+
+@pytest.mark.asyncio
+async def test_apply_dismisses_stale_discard_confirmation_before_clicking_easy_apply(monkeypatch):
+    handler = EasyApplyHandler()
+    events = []
+
+    class FakeButton:
+        async def is_visible(self):
+            return True
+
+        async def click(self):
+            events.append("discard_clicked")
+
+    class FakeDialog:
+        async def is_visible(self):
+            return True
+
+        async def query_selector(self, selector):
+            assert "data-test-dialog-primary-btn" in selector
+            return FakeButton()
+
+    class FakePage:
+        def __init__(self):
+            self.dialog_available = True
+
+        async def query_selector_all(self, selector):
+            if "easy-apply-discard-confirmation" in selector and self.dialog_available:
+                self.dialog_available = False
+                return [FakeDialog()]
+            return []
+
+    async def fake_click_easy_apply_button(page):
+        events.append("easy_apply_clicked")
+        return False
+
+    async def fake_is_modal_open(page):
+        return None
+
+    async def fake_short_delay():
+        return None
+
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler.human, "short_delay", fake_short_delay)
+
+    result = await handler.apply(page=FakePage(), dry_run=True)
+
+    assert events == ["discard_clicked", "easy_apply_clicked"]
+    assert result["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_apply_reopens_easy_apply_when_discard_confirmation_appears_after_click(monkeypatch):
+    handler = EasyApplyHandler()
+    session = StubSession(action="submit")
+    events = []
+    dismiss_results = iter([False, True, False])
+
+    async def fake_dismiss_discard_confirmation(page):
+        dismissed = next(dismiss_results)
+        if dismissed:
+            events.append("discard_clicked")
+        return dismissed
+
+    async def fake_click_easy_apply_button(page):
+        events.append("easy_apply_clicked")
+        return True
+
+    async def fake_is_modal_open(page):
+        return object()
+
+    async def fake_fill_and_validate_step(page, session, resume_path):
+        events.append("fill_step")
+        return EasyApplyResult(success=True, final_action="submit")
+
+    async def fake_cleanup_modal(page):
+        return True
+
+    async def fake_random_delay(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(handler, "_create_session", lambda page: session)
+    monkeypatch.setattr(handler, "_dismiss_discard_confirmation", fake_dismiss_discard_confirmation)
+    monkeypatch.setattr(handler, "click_easy_apply_button", fake_click_easy_apply_button)
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_fill_and_validate_step", fake_fill_and_validate_step)
+    monkeypatch.setattr(handler, "_cleanup_modal", fake_cleanup_modal)
+    monkeypatch.setattr(handler.human, "random_delay", fake_random_delay)
+
+    result = await handler.apply(page=object(), dry_run=True, max_steps=1)
+
+    assert result["success"] is True
+    assert events == ["easy_apply_clicked", "discard_clicked", "easy_apply_clicked", "fill_step"]
 
 
 @pytest.mark.asyncio
@@ -380,6 +479,52 @@ async def test_fill_and_validate_step_uses_modal_scope(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fill_and_validate_step_returns_field_unresolved(monkeypatch):
+    handler = EasyApplyHandler()
+    session = StubSession(action="next")
+    session.modal = object()
+
+    async def fake_detect_and_fill_fields(container):
+        return {
+            "resolved_fields": ["Email"],
+            "unresolved_fields": ["Work authorization"],
+            "validation_errors": [],
+        }
+
+    monkeypatch.setattr("app.automation.easy_apply.form_filler.detect_and_fill_fields", fake_detect_and_fill_fields)
+
+    result = await handler._fill_and_validate_step(page=object(), session=session, resume_path=None)
+
+    assert result.success is False
+    assert result.failure_type == "field_unresolved"
+    assert result.final_action == "blocked"
+    assert result.unresolved_fields == ["Work authorization"]
+
+
+@pytest.mark.asyncio
+async def test_fill_and_validate_step_returns_field_validation_failed(monkeypatch):
+    handler = EasyApplyHandler()
+    session = StubSession(action="next")
+    session.modal = object()
+
+    async def fake_detect_and_fill_fields(container):
+        return {
+            "resolved_fields": ["Email"],
+            "unresolved_fields": [],
+            "validation_errors": ["Years: answer must be numeric"],
+        }
+
+    monkeypatch.setattr("app.automation.easy_apply.form_filler.detect_and_fill_fields", fake_detect_and_fill_fields)
+
+    result = await handler._fill_and_validate_step(page=object(), session=session, resume_path=None)
+
+    assert result.success is False
+    assert result.failure_type == "field_validation_failed"
+    assert result.final_action == "blocked"
+    assert result.validation_errors == ["Years: answer must be numeric"]
+
+
+@pytest.mark.asyncio
 async def test_fill_and_validate_step_reports_unexpected_error(monkeypatch):
     handler = EasyApplyHandler()
     session = StubSession(action="next")
@@ -548,6 +693,34 @@ async def test_apply_localized_submit_detects_and_clicks_action(monkeypatch):
     assert result["success"] is True
     assert result["final_action"] == "submit"
     assert clicked["value"] is True
+
+
+@pytest.mark.asyncio
+async def test_cleanup_modal_clears_discard_confirmation_before_dismiss(monkeypatch):
+    handler = EasyApplyHandler()
+    state = {"modal_open": True, "discard_clicked": False}
+
+    async def fake_is_modal_open(page):
+        return object() if state["modal_open"] else None
+
+    async def fake_dismiss_discard_confirmation(page):
+        state["discard_clicked"] = True
+        state["modal_open"] = False
+        return True
+
+    async def fake_dismiss_modal(page):
+        raise AssertionError("dismiss_modal should not click under discard confirmation")
+
+    async def fake_short_delay():
+        return None
+
+    monkeypatch.setattr(handler, "is_modal_open", fake_is_modal_open)
+    monkeypatch.setattr(handler, "_dismiss_discard_confirmation", fake_dismiss_discard_confirmation)
+    monkeypatch.setattr(handler, "dismiss_modal", fake_dismiss_modal)
+    monkeypatch.setattr(handler.human, "short_delay", fake_short_delay)
+
+    assert await handler._cleanup_modal(page=object()) is True
+    assert state["discard_clicked"] is True
 
 
 @pytest.mark.asyncio

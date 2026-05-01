@@ -1,5 +1,6 @@
 """LinkedIn Easy Apply multi-step modal handler."""
 import logging
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +17,23 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 EASY_APPLY_OVERLAY_GUARD_SELECTOR = '[data-test-modal-container], .artdeco-modal-overlay'
+EASY_APPLY_DISCARD_CONFIRMATION_SELECTOR = (
+    '[data-test-modal-id="data-test-easy-apply-discard-confirmation"], '
+    '[data-test-easy-apply-discard-confirmation]'
+)
+
+
+async def _save_debug_screenshot(page: Page, label: str):
+    """Save a debug screenshot to data/logs/ on failure."""
+    try:
+        logs_dir = settings.DATA_DIR / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = logs_dir / f"debug_{label}_{timestamp}.png"
+        await page.screenshot(path=str(filename))
+        logger.info("Debug screenshot saved: %s", filename)
+    except Exception as e:
+        logger.debug("Failed to save debug screenshot: %s", e)
 
 
 class EasyApplyHandler:
@@ -62,8 +80,8 @@ class EasyApplyHandler:
             logger.warning("click_easy_apply_button failed: %s", e)
             return False
 
-    async def is_modal_open(self, page: Page) -> bool:
-        """Return the active visible Easy Apply modal/container if open."""
+    async def is_modal_open(self, page: Page):
+        """Return the active visible Easy Apply modal/container element, or None."""
         selector = (
             '.jobs-easy-apply-modal, .jobs-easy-apply-content, '
             '[data-test-easy-apply-modal], .easy-apply-modal, '
@@ -91,17 +109,17 @@ class EasyApplyHandler:
                     if await overlay.is_visible():
                         return True
                 except Exception:
-                    # If visibility probing fails, treat as potentially blocking.
-                    return True
+                    # Element may have been detached — don't treat as blocking
+                    continue
         except Exception as e:
-            logger.debug("Overlay probe failed: %s", e)
-            return True
+            logger.debug("Overlay probe failed (not blocking): %s", e)
+            return False
 
         try:
             return bool(await self.is_modal_open(page))
         except Exception as e:
-            logger.debug("Modal probe failed while checking blocking overlay: %s", e)
-            return True
+            logger.debug("Modal probe failed (not blocking): %s", e)
+            return False
 
     async def get_current_step(self, page: Page) -> tuple[int, int]:
         """Get current step info. Uses iterative tracking, not progress estimation."""
@@ -145,6 +163,11 @@ class EasyApplyHandler:
             session.step_state.validation_errors = list(filled.get("validation_errors", []))
 
             if session.step_state.unresolved_fields:
+                logger.warning(
+                    "Unresolved fields on step %d: %s",
+                    session.step_state.step_index,
+                    ", ".join(session.step_state.unresolved_fields),
+                )
                 return EasyApplyResult(
                     success=False,
                     failure_type="field_unresolved",
@@ -155,6 +178,11 @@ class EasyApplyHandler:
                 )
 
             if session.step_state.validation_errors:
+                logger.warning(
+                    "Validation errors on step %d: %s",
+                    session.step_state.step_index,
+                    ", ".join(session.step_state.validation_errors),
+                )
                 return EasyApplyResult(
                     success=False,
                     failure_type="field_validation_failed",
@@ -228,12 +256,55 @@ class EasyApplyHandler:
             if not await self.is_modal_open(page):
                 return True
 
+            await self._dismiss_discard_confirmation(page)
+            await self.human.short_delay()
+            if not await self.is_modal_open(page):
+                return True
+
             await self.dismiss_modal(page)
+            await self.human.short_delay()
+            await self._dismiss_discard_confirmation(page)
             await self.human.short_delay()
             return not bool(await self.is_modal_open(page))
         except Exception as e:
             logger.warning("_cleanup_modal failed: %s", e)
             return False
+
+    async def _dismiss_discard_confirmation(self, page: Page) -> bool:
+        """Dismiss a stale LinkedIn discard confirmation that can cover the active modal."""
+        try:
+            dialogs = await page.query_selector_all(EASY_APPLY_DISCARD_CONFIRMATION_SELECTOR)
+            for dialog in dialogs:
+                try:
+                    if not await dialog.is_visible():
+                        continue
+
+                    discard_button = await dialog.query_selector(
+                        'button[data-test-dialog-primary-btn], '
+                        'button:has-text("Discard"), '
+                        'button:has-text("丢弃")'
+                    )
+                    if discard_button and await discard_button.is_visible():
+                        await discard_button.click()
+                        await self.human.short_delay()
+                        return True
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug("Discard confirmation probe failed: %s", e)
+
+        return False
+
+    async def _recover_from_discard_confirmation(self, page: Page) -> bool:
+        """Clear a discard confirmation and reopen Easy Apply for the current job."""
+        dismissed = await self._dismiss_discard_confirmation(page)
+        if not dismissed:
+            return False
+
+        reopened = await self.click_easy_apply_button(page)
+        if reopened:
+            await self.human.random_delay(2, 4)
+        return reopened
 
     async def _confirm_submit_success(self, page: Page) -> bool:
         """Confirm submit moved the flow forward by closing modal or showing terminal dialog."""
@@ -359,9 +430,11 @@ class EasyApplyHandler:
             step_result.cleanup_success = await self._cleanup_modal(page)
             return self._to_payload(step_result, errors=errors)
 
+        await self._dismiss_discard_confirmation(page)
         clicked_easy_apply = await self.click_easy_apply_button(page)
         if clicked_easy_apply:
             await self.human.random_delay(2, 4)
+            await self._recover_from_discard_confirmation(page)
             modal = await self.is_modal_open(page)
         else:
             modal = await self.is_modal_open(page)
@@ -372,6 +445,7 @@ class EasyApplyHandler:
                 )
 
         if not modal:
+            await _save_debug_screenshot(page, "no_modal")
             return self._to_payload(
                 EasyApplyResult(success=False, failure_type="modal_not_found"),
                 errors=["Easy Apply modal did not open"],
@@ -381,6 +455,7 @@ class EasyApplyHandler:
 
         for step in range(max_steps):
             # LinkedIn often re-renders the dialog between steps; always refresh modal handle.
+            await self._recover_from_discard_confirmation(page)
             current_modal = await self.is_modal_open(page)
             if not current_modal:
                 return self._to_payload(
@@ -393,18 +468,21 @@ class EasyApplyHandler:
             step_result.steps_completed = step + 1
 
             if step_result.failure_type == "field_unresolved":
+                await _save_debug_screenshot(page, f"field_unresolved_step{step+1}")
                 return await finalize_structured_failure(
                     step_result,
                     errors=[f"Unresolved required fields: {', '.join(step_result.unresolved_fields)}"],
                 )
 
             if step_result.failure_type == "field_validation_failed":
+                await _save_debug_screenshot(page, f"validation_failed_step{step+1}")
                 return await finalize_structured_failure(
                     step_result,
                     errors=[f"Validation failed: {', '.join(step_result.validation_errors)}"],
                 )
 
             if step_result.failure_type == "advance_button_not_found":
+                await _save_debug_screenshot(page, f"no_advance_btn_step{step+1}")
                 return await finalize_structured_failure(
                     step_result,
                     errors=["Could not find Next/Review/Submit button in modal footer"],

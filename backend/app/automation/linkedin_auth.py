@@ -52,12 +52,19 @@ class LinkedInAuth:
 
         await page.goto(self.LOGIN_URL, wait_until="domcontentloaded")
 
-        # Wait for user to complete login (check every 3 seconds)
+        # Wait for user to complete login — check URL/DOM without navigating
         elapsed = 0
         while elapsed < timeout_seconds:
             await asyncio.sleep(3)
             elapsed += 3
-            if await self.is_logged_in(page):
+            # Check current page URL directly (no navigation)
+            current_url = page.url
+            if "linkedin.com/feed" in current_url or "linkedin.com/in/" in current_url:
+                await self.human.random_delay(2, 5)
+                return True
+            # Check for feed indicators (user may have navigated manually)
+            feed_indicator = await page.query_selector('.global-nav__me-photo')
+            if feed_indicator:
                 await self.human.random_delay(2, 5)
                 return True
 

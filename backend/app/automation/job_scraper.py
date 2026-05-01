@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 try:
     from playwright.async_api import Page
@@ -32,22 +33,58 @@ class JobScraper:
             logger.warning("Overlay guard failed; stopping job scrape to avoid polluted clicks: %s", e)
             return False
 
+    def _build_job_detail_url(self, current_url: str, linkedin_job_id: str) -> str:
+        """Build a LinkedIn search URL that opens the requested job detail by currentJobId."""
+        parsed = urlparse(current_url)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        query["currentJobId"] = str(linkedin_job_id)
+
+        path = parsed.path
+        if not path.startswith("/jobs/search"):
+            path = "/jobs/search/"
+
+        return urlunparse(
+            (
+                parsed.scheme or "https",
+                parsed.netloc or "www.linkedin.com",
+                path,
+                "",
+                urlencode(query),
+                "",
+            )
+        )
+
+    async def _open_job_detail_by_url(self, page: Page, linkedin_job_id: str) -> bool:
+        """Open job detail directly via currentJobId so cross-page ids do not require a visible card."""
+        try:
+            await page.goto(
+                self._build_job_detail_url(page.url, linkedin_job_id),
+                wait_until="domcontentloaded",
+                timeout=15000,
+            )
+            await self.human.random_delay(1, 2)
+            return True
+        except Exception as e:
+            logger.debug("Direct job URL open failed for %s: %s", linkedin_job_id, e)
+            return False
+
     async def scrape_job_detail(self, page: Page, linkedin_job_id: str) -> Optional[JobCreate]:
         """Click on a job card and extract full details."""
         try:
             if not await self._guard_overlay(page):
                 return None
 
-            # Click the job card to load details
-            card = await page.query_selector(f'[data-job-id="{linkedin_job_id}"]')
-            if not card:
-                card = await page.query_selector(f'[data-occludable-job-id="{linkedin_job_id}"]')
+            opened_by_url = await self._open_job_detail_by_url(page, linkedin_job_id)
+            if not opened_by_url:
+                # Fallback for LinkedIn variants where direct currentJobId navigation fails.
+                card = await page.query_selector(f'[data-job-id="{linkedin_job_id}"]')
+                if not card:
+                    card = await page.query_selector(f'[data-occludable-job-id="{linkedin_job_id}"]')
 
-            if not card:
-                logger.warning("Job card not found for ID: %s", linkedin_job_id)
-                return None
+                if not card:
+                    logger.warning("Job card not found for ID: %s", linkedin_job_id)
+                    return None
 
-            if card:
                 await self.human.human_click(card)
                 await self.human.random_delay(2, 4)
 
@@ -65,10 +102,20 @@ class JobScraper:
             # Description
             description = await self._get_text(page, '.jobs-description__content, .jobs-box__html-content')
 
-            # Easy Apply check
-            easy_apply_btn = await page.query_selector('.jobs-apply-button--top-card button, .jobs-apply-button')
-            easy_apply_text = await self._get_text(page, '.jobs-apply-button--top-card button, .jobs-apply-button') if easy_apply_btn else ""
-            is_easy_apply = "easy apply" in easy_apply_text.lower() if easy_apply_text else False
+            # Easy Apply check — multiple selectors with fallback
+            easy_apply_btn = await page.query_selector(
+                'button.jobs-apply-button, '
+                '.jobs-apply-button--top-card button, '
+                'button[aria-label*="Easy Apply"], '
+                'button[aria-label*="easy apply"], '
+                '.jobs-s-apply button'
+            )
+            is_easy_apply = easy_apply_btn is not None
+            if not is_easy_apply:
+                # Fallback: check button text
+                apply_text = await self._get_text(page, '.jobs-apply-button, .jobs-apply-button--top-card button')
+                if apply_text and "apply" in apply_text.lower():
+                    is_easy_apply = True
 
             # Job URL
             job_url = f"https://www.linkedin.com/jobs/view/{linkedin_job_id}/"

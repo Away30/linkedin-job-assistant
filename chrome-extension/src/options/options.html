@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>LinkedIn Auto-Apply Settings</title>
+  <title>LinkedIn 自动投递 - 设置</title>
   <style>
     * {
       margin: 0;
@@ -175,135 +175,254 @@
 </head>
 <body>
   <div class="container">
-    <h1>⚙️ Settings</h1>
+    <h1>⚙️ 设置</h1>
 
     <div id="message" class="message" style="display: none;"></div>
 
     <!-- Connection & API Key Section -->
-    <h2>Connection & API Key</h2>
+    <h2>连接与 API 密钥</h2>
     <div class="section">
       <div class="form-row">
         <div class="form-group">
-          <label>API Key</label>
-          <input type="password" id="apiKeyInput" placeholder="Enter your API key" />
+          <label>API 密钥</label>
+          <input type="password" id="apiKeyInput" placeholder="请输入 API 密钥" />
         </div>
         <div class="form-group" style="display:flex;align-items:flex-end;">
-          <button class="btn-primary" id="saveApiKeyBtn">Save API Key</button>
+          <button class="btn-primary" id="saveApiKeyBtn">保存密钥</button>
         </div>
       </div>
       <div class="button-group">
-        <button class="btn-secondary" id="testConnectionBtn">Test Connection</button>
+        <button class="btn-secondary" id="testConnectionBtn">测试连接</button>
         <span id="testConnectionResult" style="margin-left:12px;line-height:36px;font-size:13px;"></span>
       </div>
     </div>
 
     <!-- Search Filters Section -->
-    <h2>Search Filters</h2>
+    <h2>搜索条件</h2>
     <div class="section">
       <div class="form-group">
-        <label>Filter Name</label>
-        <input type="text" id="filterName" placeholder="e.g., Software Engineer Bay Area" />
+        <label>条件名称</label>
+        <input type="text" id="filterName" placeholder="例如：湾区软件工程师" />
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Keywords</label>
-          <input type="text" id="filterKeywords" placeholder="e.g., Python, React, Backend" />
+          <label>关键词</label>
+          <input type="text" id="filterKeywords" placeholder="例如：Python, React, 后端" />
         </div>
         <div class="form-group">
-          <label>Location</label>
-          <input type="text" id="filterLocation" placeholder="e.g., San Francisco, CA" />
+          <label>地点</label>
+          <input type="text" id="filterLocation" placeholder="例如：旧金山, 远程" />
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Job Type (comma-separated)</label>
-          <input type="text" id="filterJobType" placeholder="e.g., full-time,contract" />
+          <label>工作类型（逗号分隔）</label>
+          <input type="text" id="filterJobType" placeholder="例如：全职,合同工" />
         </div>
         <div class="form-group">
-          <label>Experience Level</label>
+          <label>经验级别</label>
           <select id="filterExperience">
-            <option value="">Any</option>
-            <option value="entry">Entry Level</option>
-            <option value="associate">Associate</option>
-            <option value="mid">Mid-Level</option>
-            <option value="senior">Senior</option>
-            <option value="executive">Executive</option>
+            <option value="">不限</option>
+            <option value="entry">入门级</option>
+            <option value="associate">助理级</option>
+            <option value="mid">中级</option>
+            <option value="senior">高级</option>
+            <option value="executive">管理层</option>
           </select>
         </div>
       </div>
       <div class="form-group">
         <label>
-          <input type="checkbox" id="easyApplyOnly" /> Easy Apply Only
+          <input type="checkbox" id="easyApplyOnly" checked /> 仅限一键申请
         </label>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>发布时间</label>
+          <select id="filterDatePosted">
+            <option value="">不限</option>
+            <option value="past-24h" selected>24 小时内</option>
+            <option value="past-week">一周内</option>
+            <option value="past-month">一个月内</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>最低匹配度（%）</label>
+          <input type="number" id="filterMinScore" min="0" max="100" value="40" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>必备技能（逗号分隔，用于计算匹配度）</label>
+        <input type="text" id="filterRequiredSkills" placeholder="例如：Python, React, SQL, AWS" />
+      </div>
+      <div class="form-group">
+        <label>加分技能（逗号分隔）</label>
+        <input type="text" id="filterPreferredSkills" placeholder="例如：Docker, Kubernetes, CI/CD" />
+      </div>
       <div class="button-group">
-        <button class="btn-primary" id="saveFilterBtn">Save Filter</button>
+        <button class="btn-primary" id="saveFilterBtn">保存条件</button>
       </div>
 
       <div class="filter-list" id="filterList"></div>
     </div>
 
     <!-- Resumes Section -->
-    <h2>Resumes</h2>
+    <h2>简历管理</h2>
     <div class="section">
       <div class="form-group">
-        <label>Resume Name</label>
-        <input type="text" id="resumeName" placeholder="e.g., Software Engineer Resume" />
+        <label>简历名称</label>
+        <input type="text" id="resumeName" placeholder="例如：软件工程师简历" />
       </div>
       <div class="form-group">
-        <label>Resume File (PDF)</label>
+        <label>简历文件（PDF）</label>
         <input type="file" id="resumeFile" accept=".pdf" />
       </div>
       <div class="form-group">
-        <label>Target Roles (comma-separated)</label>
-        <input type="text" id="resumeRoles" placeholder="e.g., Software Engineer, Frontend Engineer" />
+        <label>目标职位（逗号分隔）</label>
+        <input type="text" id="resumeRoles" placeholder="例如：软件工程师, 前端工程师" />
       </div>
       <div class="form-group">
         <label>
-          <input type="checkbox" id="resumeDefault" /> Set as Default
+          <input type="checkbox" id="resumeDefault" /> 设为默认简历
         </label>
       </div>
       <div class="button-group">
-        <button class="btn-primary" id="uploadResumeBtn">Upload Resume</button>
+        <button class="btn-primary" id="uploadResumeBtn">上传简历</button>
       </div>
 
       <div class="resume-list" id="resumeList"></div>
     </div>
 
     <!-- Safety Settings Section -->
-    <h2>Safety & Rate Limiting</h2>
+    <h2>安全与限速设置</h2>
     <div class="section">
       <div class="form-row">
         <div class="form-group">
-          <label>Max Applications Per Day</label>
+          <label>每日最大投递数</label>
           <input type="number" id="maxAppliesPerDay" min="1" max="100" value="25" />
         </div>
         <div class="form-group">
-          <label>Max Connect Requests Per Day</label>
+          <label>每日最大好友申请数</label>
           <input type="number" id="maxConnectsPerDay" min="1" max="100" value="20" />
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Min Delay Between Actions (seconds)</label>
+          <label>操作最短间隔（秒）</label>
           <input type="number" id="minDelay" min="1" max="30" value="3" />
         </div>
         <div class="form-group">
-          <label>Max Delay Between Actions (seconds)</label>
+          <label>操作最长间隔（秒）</label>
           <input type="number" id="maxDelay" min="5" max="60" value="12" />
         </div>
       </div>
       <div class="form-group">
         <label>
-          <input type="checkbox" id="warmupEnabled" checked /> Enable Warmup Mode (7-day ramp-up)
+          <input type="checkbox" id="warmupEnabled" checked /> 启用预热模式（7 天渐进提速）
         </label>
       </div>
       <div class="button-group">
-        <button class="btn-primary" id="saveSafetyBtn">Save Settings</button>
+        <button class="btn-primary" id="saveSafetyBtn">保存设置</button>
+      </div>
+    </div>
+
+    <!-- Networking Settings Section -->
+    <h2>🤝 社交设置（投递后自动 connect）</h2>
+    <div class="section">
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="networkingEnabled" /> 启用投递后自动社交（默认关闭）
+        </label>
+      </div>
+      <div class="form-group">
+        <label>每次投递最多发送连接请求数</label>
+        <input type="number" id="networkingMaxPerSession" min="1" max="10" value="3" />
+      </div>
+      <div class="form-group">
+        <label>目标身份类型（逗号分隔）</label>
+        <input type="text" id="networkingPersonTypes" value="recruiter,hiring_manager" placeholder="recruiter, hiring_manager, engineer" />
+      </div>
+
+      <h3 style="font-size:14px;color:#0a66c2;margin:16px 0 8px;">自定义消息模板（{name} {company} {role} 为变量，上限 300 字符）</h3>
+      <div class="form-group">
+        <label>Recruiter 消息</label>
+        <textarea id="msgRecruiter" rows="2" maxlength="300" placeholder="留空使用默认模板"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Hiring Manager 消息</label>
+        <textarea id="msgHiringManager" rows="2" maxlength="300" placeholder="留空使用默认模板"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Engineer 消息</label>
+        <textarea id="msgEngineer" rows="2" maxlength="300" placeholder="留空使用默认模板"></textarea>
+      </div>
+
+      <div class="button-group">
+        <button class="btn-primary" id="saveNetworkingBtn">保存社交设置</button>
+      </div>
+    </div>
+
+    <!-- Form Answers Section -->
+    <h2>📝 表单自动填写</h2>
+    <div class="section">
+      <p style="color:#666;font-size:13px;margin-bottom:12px;">
+        配置 Easy Apply 表单中常用的个人信息。系统会自动匹配并填写对应字段。
+      </p>
+
+      <h3 style="font-size:14px;color:#0a66c2;margin:12px 0 8px;">联系方式</h3>
+      <div class="form-row">
+        <div class="form-group"><label>手机号</label><input type="text" id="fa_phone_number" /></div>
+        <div class="form-group"><label>邮箱</label><input type="email" id="fa_email" /></div>
+      </div>
+
+      <h3 style="font-size:14px;color:#0a66c2;margin:12px 0 8px;">个人信息</h3>
+      <div class="form-row">
+        <div class="form-group"><label>名</label><input type="text" id="fa_first_name" /></div>
+        <div class="form-group"><label>姓</label><input type="text" id="fa_last_name" /></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>城市</label><input type="text" id="fa_city" /></div>
+        <div class="form-group"><label>州/省</label><input type="text" id="fa_state" /></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>国家</label><input type="text" id="fa_country" /></div>
+        <div class="form-group"><label>邮编</label><input type="text" id="fa_zip_code" /></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>LinkedIn 主页</label><input type="url" id="fa_linkedin_url" /></div>
+        <div class="form-group"><label>个人网站/GitHub</label><input type="url" id="fa_website" /></div>
+      </div>
+
+      <h3 style="font-size:14px;color:#0a66c2;margin:12px 0 8px;">工作相关</h3>
+      <div class="form-row">
+        <div class="form-group"><label>工作年限</label><input type="text" id="fa_years_of_experience" /></div>
+        <div class="form-group"><label>工作许可</label><input type="text" id="fa_work_authorization" placeholder="Yes / No" /></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>是否需要签证赞助</label><input type="text" id="fa_sponsorship" placeholder="Yes / No" /></div>
+        <div class="form-group"><label>是否愿意搬迁</label><input type="text" id="fa_willing_to_relocate" placeholder="Yes / No" /></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>到岗时间</label><input type="text" id="fa_start_date" placeholder="如: 2 weeks notice" /></div>
+        <div class="form-group"><label>期望薪资</label><input type="text" id="fa_salary_expectation" /></div>
+      </div>
+
+      <h3 style="font-size:14px;color:#0a66c2;margin:12px 0 8px;">教育背景</h3>
+      <div class="form-row">
+        <div class="form-group"><label>学位</label><input type="text" id="fa_degree" /></div>
+        <div class="form-group"><label>学校</label><input type="text" id="fa_school" /></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>专业</label><input type="text" id="fa_field_of_study" /></div>
+        <div class="form-group"><label>GPA</label><input type="text" id="fa_gpa" /></div>
+      </div>
+
+      <div class="button-group">
+        <button class="btn-primary" id="saveFormAnswersBtn">保存表单答案</button>
       </div>
     </div>
   </div>
 
-  <script src="options.js"></script>
+  <script type="module" src="options.js"></script>
 </body>
 </html>

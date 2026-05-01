@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, DateTime
 from app.db.session import Base
 
@@ -11,4 +11,4 @@ class OperationLog(Base):
     status = Column(String(50), default="started")  # started, success, failed, error
     error_message = Column(Text, nullable=True)
     duration_ms = Column(Integer, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())

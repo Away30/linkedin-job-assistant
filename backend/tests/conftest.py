@@ -1,5 +1,22 @@
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
+
+_TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="lja-pytest-"))
+_TEST_DB_PATH = _TEST_DATA_DIR / "db" / "linkedin_assistant_test.db"
+_TEST_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# App modules create their engine and config at import time, so tests must
+# redirect all persistent paths before importing app.main or app.db.session.
+os.environ["LJA_DATA_DIR"] = str(_TEST_DATA_DIR)
+os.environ["LJA_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
+os.environ["LJA_RESUME_DIR"] = str(_TEST_DATA_DIR / "resumes")
+os.environ["LJA_FORM_ANSWERS_PATH"] = str(_TEST_DATA_DIR / "config" / "form_answers.yaml")
+os.environ["LJA_BROWSER_PROFILE_DIR"] = str(_TEST_DATA_DIR / "browser_profile")
 
 app = None
 Base = None
@@ -53,3 +70,7 @@ def api_key():
 @pytest.fixture
 def client(api_key):
     return TestClient(app, headers={"X-API-Key": api_key})
+
+
+def pytest_sessionfinish(session, exitstatus):
+    shutil.rmtree(_TEST_DATA_DIR, ignore_errors=True)
