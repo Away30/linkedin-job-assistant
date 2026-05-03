@@ -34,6 +34,9 @@
     }
   },
   "options_page": "src/options/options.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src http://localhost:8899 https://www.linkedin.com; img-src 'self' data: https:; style-src 'self'"
+  },
   "icons": {
     "16": "src/assets/icons/icon16.png",
     "48": "src/assets/icons/icon48.png",

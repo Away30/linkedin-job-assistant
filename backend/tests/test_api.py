@@ -52,8 +52,16 @@ def test_automation_status_field_names(client):
     assert isinstance(data["jobs_failed"], int)
 
 
-def test_automation_start_accepts_max_applies(client):
+def test_automation_start_accepts_max_applies(client, monkeypatch):
     """Backend accepts max_applies without 422."""
+    from app.api import routes
+
+    async def fake_start(request):
+        routes.automation_service.session_id = "test-session"
+
+    monkeypatch.setattr(routes.automation_service, "is_running", False)
+    monkeypatch.setattr(routes.automation_service, "start", fake_start)
+
     filter_resp = client.post("/api/v1/filters", json={
         "name": "Contract Test Filter",
         "keywords": "Engineer",
